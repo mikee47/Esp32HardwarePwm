@@ -1,15 +1,33 @@
-# Prerequisites
-*.d
+# ESP32 Hardware PWM Component .gitignore
 
-# Compiled Object files
-*.slo
-*.lo
+# Build directories
+build/
+dist/
+out/
+
+# Compiled object files
 *.o
 *.obj
+*.elf
+*.bin
+*.hex
+*.map
+*.slo
+*.lo
+
+# Dependency files
+*.d
+*.dep
 
 # Precompiled Headers
 *.gch
 *.pch
+
+# Libraries
+*.lib
+*.a
+*.lai
+*.la
 
 # Compiled Dynamic libraries
 *.so
@@ -20,13 +38,123 @@
 *.mod
 *.smod
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
 # Executables
 *.exe
 *.out
 *.app
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# IDE files
+.vscode/
+.vs/
+*.swp
+*.swo
+*~
+.idea/
+*.iml
+
+# Sming specific
+out/
+.vscode/c_cpp_properties.json
+
+# ESP-IDF specific
+sdkconfig
+sdkconfig.old
+build*/
+*.bin
+*.map
+*.elf
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Documentation generated files
+docs/html/
+docs/latex/
+docs/xml/
+docs/rtf/
+docs/man/
+*.tag
+
+# Package files
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# Local configuration files that shouldn't be committed
+local_config.h
+user_config.h
+wifi_credentials.h
+
+# Compiler cache
+.ccache/
+
+# Test results
+test_results/
+coverage/
+*.gcov
+*.gcda
+*.gcno
+
+# Python bytecode (if any Python scripts are added)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node.js dependencies (if any web interface tools are added)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor backup files
+*~
+#*#
+.#*
+
+# CTags and ETags files
+TAGS
+tags
+.tags
+.tags1
+
+# Cscope files
+cscope.files
+cscope.out
+cscope.in.out
+cscope.po.out
+
+# Local development environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Platform specific
+.platformio/
+
+# Custom ignore patterns
+# Add any project-specific files that should be ignored below this line

@@ -1,0 +1,44 @@
+{
+  "name": "Esp32HardwarePwm",
+  "version": "1.0.0",
+  "description": "Comprehensive ESP32 LEDC PWM wrapper for Sming Framework with automatic resource management, phase shifting, and hardware fade support",
+  "keywords": [
+    "ESP32",
+    "PWM", 
+    "LEDC",
+    "hardware",
+    "fade",
+    "phase-shift",
+    "sming",
+    "esp-idf"
+  ],
+  "author": "Peter Jakobs <pjakobs@cenoq.com>",
+  "license": "LGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pljakobs/Esp32HardwarePwm.git"
+  },
+  "dependencies": {
+    "SmingCore": "*"
+  },
+  "frameworks": [
+    "sming"
+  ],
+  "platforms": [
+    "esp32"
+  ],
+  "arch": [
+    "esp32"
+  ],
+  "targets": {
+    "esp32": {
+      "vendor": "espressif"
+    }
+  },
+  "build": {
+    "flags": [
+      "-std=c++17"
+    ],
+    "cpp_std": "c++17"
+  }
+}
