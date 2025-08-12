@@ -42,8 +42,7 @@
 #include "Esp32PwmPlatform.h"
 
 #define PWM_BAD_CHANNEL 0xff ///< Invalid PWM channel
-#define PWM_SPREAD_SPECTRUM_ON true ///< Spread spectrum modulation enabled
-#define PWM_SPREAD_SPECTRUM_OFF false ///< Spread spectrum modulation disabled
+
 /**
  * @brief ESP32 PWM Configuration parameters
  */
@@ -73,84 +72,47 @@ struct PwmChannelInfo {
     bool is_active = false;                           ///< Channel active status
 };
 
-/**
- * @brief Global resource manager for ESP32 PWM
- * 
- * This singleton class manages the allocation of LEDC channels and timers
- * across multiple PWM instances to prevent resource conflicts.
- */
-class Esp32PwmResourceManager {
-public:
-    /**
-     * @brief Get the singleton instance
-     */
-    static Esp32PwmResourceManager& getInstance();
+#include <array>
+#include <cstdint>
 
-    /**
-     * @brief Allocate LEDC resources for a PWM instance
-     * @param pins Array of GPIO pins
-     * @param pin_count Number of pins
-     * @param config PWM configuration
-     * @return Vector of allocated channel info, empty if allocation failed
-     */
-    std::vector<PwmChannelInfo> allocateChannels(const uint8_t* pins, uint8_t pin_count, 
-                                                  const Esp32PwmConfig& config);
+enum class PhaseShiftMode : uint8_t {
+    OFF,
+    AUTO,
+    MANUAL
+};
 
-    /**
-     * @brief Release allocated channels
-     * @param channels Vector of channel info to release
-     */
-    void releaseChannels(const std::vector<PwmChannelInfo>& channels);
+template <size_t N>
+struct Esp32HwPwmPhaseShiftConfig {
+    PhaseShiftMode mode;
+    std::array<int, N> manual_hpoints; // Only used if mode == MANUAL
+};
 
-    /**
-     * @brief Get available channel count for a speed mode
-     * @param speed_mode LEDC speed mode
-     * @return Number of available channels
-     */
-    uint8_t getAvailableChannelCount(ledc_mode_t speed_mode) const;
+enum class SpreadSpectrumMode : uint8_t {
+    OFF,
+    ON
+};
 
-    /**
-     * @brief Get available timer count for a speed mode
-     * @param speed_mode LEDC speed mode
-     * @return Number of available timers
-     */
-    uint8_t getAvailableTimerCount(ledc_mode_t speed_mode) const;
+struct Esp32HwPwmModulationConfig {
+    SpreadSpectrumMode mode;
+    uint8_t modulationWidthPercent;
+    uint8_t modulationSubsampling;
+    uint8_t modulationStepsizePercent;
+};
 
-private:
-    Esp32PwmResourceManager() = default;
-    ~Esp32PwmResourceManager() = default;
-    Esp32PwmResourceManager(const Esp32PwmResourceManager&) = delete;
-    Esp32PwmResourceManager& operator=(const Esp32PwmResourceManager&) = delete;
+template <size_t N>
+struct Esp32HwPwmTimerConfig{
+    ledc_mode_t speed_mode;
+    ledc_timer_bit_t duty_resolution;
+    ledc_timer_t timer_num;
+    uint32_t freq_hz;
+    ledc_clk_cfg_t clk_cfg;
+};
 
-    mutable std::mutex resource_mutex_;
-    
-    // Track channel allocation
-    bool allocated_channels_[LEDC_SPEED_MODE_MAX][SOC_LEDC_CHANNEL_NUM] = {{false}};
-    
-    // Track timer allocation and configuration
-    struct TimerInfo {
-        bool allocated = false;
-        uint32_t frequency = 0;
-        ledc_timer_bit_t resolution = LEDC_TIMER_10_BIT;
-        ledc_clk_cfg_t clock_source = LEDC_AUTO_CLK;
-        uint8_t reference_count = 0;  // Number of channels using this timer
-    };
-    TimerInfo allocated_timers_[LEDC_SPEED_MODE_MAX][LEDC_TIMER_MAX] = {{{false}}};
-
-    /**
-     * @brief Find or allocate a compatible timer
-     */
-    ledc_timer_t findOrAllocateTimer(ledc_mode_t speed_mode, const Esp32PwmConfig& config);
-
-    /**
-     * @brief Configure LEDC timer
-     */
-    bool configureTimer(ledc_mode_t speed_mode, ledc_timer_t timer, const Esp32PwmConfig& config);
-
-    /**
-     * @brief Release timer if no longer used
-     */
-    void releaseTimer(ledc_mode_t speed_mode, ledc_timer_t timer);
+struct Esp32HwPwmConfig {
+    uint8_t channel_start;
+    Esp32TimerConfig timer_config;
+    Esp32HwPwmPhaseShiftConfig<N> phase_shift;
+    Esp32HwPwmModulationConfig modulation;
 };
 
 /**

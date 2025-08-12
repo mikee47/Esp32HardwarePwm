@@ -58,207 +58,42 @@ uint32_t periodToFrequency(uint32_t period_us) {
 
 } // anonymous namespace
 
-//=============================================================================
-// Esp32PwmResourceManager Implementation
-//=============================================================================
+/*
+typedef struct {
+    int gpio_num;                   //!< the LEDC output gpio_num, if you want to use gpio16, gpio_num = 16 
+    ledc_mode_t speed_mode;         //!< LEDC speed speed_mode, high-speed mode (only exists on esp32) or low-speed mode 
+    ledc_channel_t channel;         //!< LEDC channel (0 - LEDC_CHANNEL_MAX-1) 
+    ledc_intr_type_t intr_type;     //!< configure interrupt, Fade interrupt enable  or Fade interrupt disable 
+    ledc_timer_t timer_sel;         //!< Select the timer source of channel (0 - LEDC_TIMER_MAX-1) 
+    uint32_t duty;                  //!< LEDC channel duty, the range of duty setting is [0, (2**duty_resolution)] 
+    int hpoint;                     //!< LEDC channel hpoint value, the range is [0, (2**duty_resolution)-1] 
+    struct {
+        unsigned int output_invert: 1;//!< Enable (1) or disable (0) gpio output invert 
+    } flags;                        //!< LEDC flags 
 
-Esp32PwmResourceManager& Esp32PwmResourceManager::getInstance() {
-    static Esp32PwmResourceManager instance;
-    return instance;
-}
+} ledc_channel_config_t;
 
-std::vector<PwmChannelInfo> Esp32PwmResourceManager::allocateChannels(
-    const uint8_t* pins, uint8_t pin_count, const Esp32PwmConfig& config) {
-    if (pins == nullptr || pin_count == 0) {
-        debug_e("Invalid parameters for channel allocation");
-        return {}; // Return empty vector
-    }
-    debug_i("allocateChannels called with pin_count=%d", pin_count);
-    for (uint8_t i = 0; i < pin_count; ++i) {
-        debug_i("  pins[%d]=%d", i, pins[i]);
-    }
-    debug_i("  config.frequency=%d", config.frequency);
-    debug_i("  config.resolution=%d", config.resolution);
-    debug_i("  config.speed_mode=%d", config.speed_mode);
-    debug_i("  config.clock_source=%d", config.clock_source);
-    debug_i("  config.use_phase_shift=%d", config.use_phase_shift);
+typedef struct {
+    ledc_mode_t speed_mode;                //!< LEDC speed speed_mode, high-speed mode (only exists on esp32) or low-speed mode */
+    ledc_timer_bit_t duty_resolution;      //!< LEDC channel duty resolution */
+    ledc_timer_t  timer_num;               //!< The timer source of channel (0 - LEDC_TIMER_MAX-1) */
+    uint32_t freq_hz;                      //!< LEDC timer frequency (Hz) */
+    ledc_clk_cfg_t clk_cfg;                //!< Configure LEDC source clock from ledc_clk_cfg_t.
+                                           //   Note that LEDC_USE_RC_FAST_CLK and LEDC_USE_XTAL_CLK are
+                                           //   non-timer-specific clock sources. You can not have one LEDC timer uses
+                                           //   RC_FAST_CLK as the clock source and have another LEDC timer uses XTAL_CLK
+                                           //   as its clock source. All chips except esp32 and esp32s2 do not have
+                                           //   timer-specific clock sources, which means clock source for all timers
+                                           //   must be the same one. */
+    bool deconfigure;                      // Set this field to de-configure a LEDC timer which has been configured before
+                                           //     Note that it will not check whether the timer wants to be de-configured
+                                                is binded to any channel. Also, the timer has to be paused first before
+                                                it can be de-configured.
+                                                When this field is set, duty_resolution, freq_hz, clk_cfg fields are ignored. */
+} ledc_timer_config_t;
+*/
 
-    std::lock_guard<std::mutex> lock(resource_mutex_);
-    debug_i("lock guard acquired");
-    std::vector<PwmChannelInfo> allocated_channels;
-    
-    // Check if we have enough available channels
-    if (getAvailableChannelCount(config.speed_mode) < pin_count) {
-        debug_e("Not enough available channels for speed mode %d", config.speed_mode);
-        return allocated_channels; // Return empty vector
-    }
-    
-    // Find or allocate a timer for this configuration
-    debug_i("allocating timer");
-    ledc_timer_t timer = findOrAllocateTimer(config.speed_mode, config);
-    if (timer == LEDC_TIMER_MAX) {
-        debug_e("No available timer for speed mode %d", config.speed_mode);
-        return allocated_channels;
-    }
-    
-    // Allocate channels
-    for (uint8_t i = 0; i < pin_count; i++) {
-        // Find next available channel
-        ledc_channel_t channel = LEDC_CHANNEL_MAX;
-        for (int ch = 0; ch < SOC_LEDC_CHANNEL_NUM; ch++) {
-            if (!allocated_channels_[config.speed_mode][ch]) {
-                channel = static_cast<ledc_channel_t>(ch);
-                break;
-            }
-        }
-        
-        if (channel == LEDC_CHANNEL_MAX) {
-            debug_e("No available channel for pin %d", pins[i]);
-            // Release previously allocated channels
-            for (auto& ch : allocated_channels) {
-                allocated_channels_[ch.speed_mode][ch.channel] = false;
-            }
-            releaseTimer(config.speed_mode, timer);
-            return std::vector<PwmChannelInfo>(); // Return empty vector
-        }
-        
-        // Mark channel as allocated
-        allocated_channels_[config.speed_mode][channel] = true;
-        
-        // Create channel info
-        PwmChannelInfo channel_info;
-        channel_info.gpio_pin = pins[i];
-        channel_info.channel = channel;
-        channel_info.timer = timer;
-        channel_info.speed_mode = config.speed_mode;
-        channel_info.current_duty = 0;
-        channel_info.is_active = false;
-        
-        allocated_channels.push_back(channel_info);
-    }
-    
-    // Increment timer reference count
-    allocated_timers_[config.speed_mode][timer].reference_count += pin_count;
-    
-    debug_i("Allocated %d channels for speed mode %d using timer %d", 
-            pin_count, config.speed_mode, timer);
-    
-    return allocated_channels;
-}
-
-void Esp32PwmResourceManager::releaseChannels(const std::vector<PwmChannelInfo>& channels) {
-    std::lock_guard<std::mutex> lock(resource_mutex_);
-    
-    for (const auto& channel : channels) {
-        // Mark channel as available
-        allocated_channels_[channel.speed_mode][channel.channel] = false;
-        
-        // Decrease timer reference count
-        auto& timer_info = allocated_timers_[channel.speed_mode][channel.timer];
-        if (timer_info.reference_count > 0) {
-            timer_info.reference_count--;
-            
-            // Release timer if no longer used
-            if (timer_info.reference_count == 0) {
-                releaseTimer(channel.speed_mode, channel.timer);
-            }
-        }
-    }
-    
-    debug_i("Released %d channels", channels.size());
-}
-
-uint8_t Esp32PwmResourceManager::getAvailableChannelCount(ledc_mode_t speed_mode) const {
-    debug_i("getAvailableChannelCount called");
-    //std::lock_guard<std::mutex> lock(resource_mutex_);
-    debug_i("got lock_guard");
-    uint8_t available = 0;
-    for (int ch = 0; ch < SOC_LEDC_CHANNEL_NUM; ch++) {
-        if (!allocated_channels_[speed_mode][ch]) {
-            available++;
-        }
-    }
-    return available;
-}
-
-uint8_t Esp32PwmResourceManager::getAvailableTimerCount(ledc_mode_t speed_mode) const {
-    //std::lock_guard<std::mutex> lock(resource_mutex_);
-    
-    uint8_t available = 0;
-    for (int timer = 0; timer < LEDC_TIMER_MAX; timer++) {
-        if (!allocated_timers_[speed_mode][timer].allocated) {
-            available++;
-        }
-    }
-    return available;
-}
-
-ledc_timer_t Esp32PwmResourceManager::findOrAllocateTimer(ledc_mode_t speed_mode, 
-                                                          const Esp32PwmConfig& config) {
-    // First, try to find a compatible existing timer
-    for (int timer = 0; timer < LEDC_TIMER_MAX; timer++) {
-        auto& timer_info = allocated_timers_[speed_mode][timer];
-        if (timer_info.allocated && 
-            timer_info.frequency == config.frequency &&
-            timer_info.resolution == config.resolution &&
-            timer_info.clock_source == config.clock_source) {
-            return static_cast<ledc_timer_t>(timer);
-        }
-    }
-    
-    // If no compatible timer found, allocate a new one
-    for (int timer = 0; timer < LEDC_TIMER_MAX; timer++) {
-        debug_i("Trying to configure and allocate timer %d for speed_mode %d", timer, speed_mode);
-        if (!allocated_timers_[speed_mode][timer].allocated) {
-            debug_i("Timer config: freq=%d, resolution=%d, clock_source=%d", 
-                    config.frequency, config.resolution, config.clock_source);
-            if (configureTimer(speed_mode, static_cast<ledc_timer_t>(timer), config)) {
-                debug_i("Successfully configured and allocated timer %d for speed_mode %d", timer, speed_mode);
-                allocated_timers_[speed_mode][timer].allocated = true;
-                allocated_timers_[speed_mode][timer].frequency = config.frequency;
-                allocated_timers_[speed_mode][timer].resolution = config.resolution;
-                allocated_timers_[speed_mode][timer].clock_source = config.clock_source;
-                allocated_timers_[speed_mode][timer].reference_count = 0;
-                return static_cast<ledc_timer_t>(timer);
-            }
-        }
-    }
-    
-    return LEDC_TIMER_MAX; // No timer available
-}
-
-bool Esp32PwmResourceManager::configureTimer(ledc_mode_t speed_mode, ledc_timer_t timer, 
-                                             const Esp32PwmConfig& config) {
-    debug_i("configureTimer");
-    ledc_timer_config_t timer_config = {
-        .speed_mode = speed_mode,
-        .duty_resolution = config.resolution,
-        .timer_num = timer,
-        .freq_hz = config.frequency,
-        .clk_cfg = config.clock_source
-    };
-
-    debug_i("Timer config details: speed_mode=%d, duty_resolution=%d, timer_num=%d, freq_hz=%d, clk_cfg=%d",
-            timer_config.speed_mode, timer_config.duty_resolution, timer_config.timer_num,
-            timer_config.freq_hz, timer_config.clk_cfg);
-
-    esp_err_t result = ledc_timer_config(&timer_config);
-    if (result != ESP_OK) {
-        debug_e("Failed to configure timer %d: %s", timer, esp_err_to_name(result));
-        return false;
-    }
-    
-    debug_i("Configured timer %d: speed_mode=%d, freq=%d, resolution=%d", 
-            timer, speed_mode, config.frequency, config.resolution);
-    
-    return true;
-}
-
-void Esp32PwmResourceManager::releaseTimer(ledc_mode_t speed_mode, ledc_timer_t timer) {
-    allocated_timers_[speed_mode][timer] = TimerInfo{}; // Reset to default
-    debug_i("Released timer %d for speed mode %d", timer, speed_mode);
-}
-
+ledc_timer_config_t
 //=============================================================================
 // Esp32HardwarePwm Implementation
 //=============================================================================
