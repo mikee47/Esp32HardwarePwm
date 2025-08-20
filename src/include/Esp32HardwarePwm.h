@@ -63,32 +63,30 @@ struct PwmChannelInfo {
 enum class PhaseShiftMode : uint8_t { OFF, AUTO, MANUAL };
 enum class SpreadSpectrumMode : uint8_t { OFF, ON };
 
-template <size_t N>
 struct Esp32HwPwmPhaseShiftConfig {
     PhaseShiftMode mode = PhaseShiftMode::OFF;
-    std::array<int, N> manual_hpoints = {};
+    std::vector<int> manual_hpoints = {};
 };
 
 struct Esp32HwPwmModulationConfig {
     SpreadSpectrumMode mode = SpreadSpectrumMode::OFF;
-    uint8_t modulationWidthPercent = 0;
-    uint8_t modulationSubsampling = 0;
-    uint8_t modulationStepsizePercent = 0;
+    uint8_t WidthPercent = 0;
+    uint8_t Subsampling = 0;
+    uint8_t StepsizePercent = 0;
 };
 
 struct Esp32HwPwmTimerConfig {
     ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;
-    ledc_timer_bit_t duty_resolution = LEDC_TIMER_10_BIT;
+    ledc_timer_bit_t resolution = LEDC_TIMER_10_BIT;
     ledc_timer_t timer_num = LEDC_TIMER_0;
-    uint32_t freq_hz = 1000;
+    uint32_t frequency = 1000;
     ledc_clk_cfg_t clk_cfg = LEDC_AUTO_CLK;
 };
 
-template <size_t N>
 struct Esp32HwPwmConfig {
     uint8_t channel_start = 0;
-    Esp32HwPwmTimerConfig timer_config = {};
-    Esp32HwPwmPhaseShiftConfig<N> phase_shift = {};
+    Esp32HwPwmTimerConfig timer = {};
+    Esp32HwPwmPhaseShiftConfig phase_shift = {};
     Esp32HwPwmModulationConfig modulation = {};
 };
 
@@ -106,23 +104,20 @@ struct Esp32HwPwmConfig {
  * 
  * @note This class is designed specifically for ESP32 architecture
  */
-template <size_t N>
 class Esp32HardwarePwm {
 public:
     /**
      * @brief Construct PWM instance with default configuration
-     * @param pins Array of GPIO pins to control
-     * @param pin_count Number of pins in the array
+     * @param pins Vector of GPIO pins to control
      */
-    Esp32HardwarePwm(const std::array<uint8_t, N>& pins);
+    Esp32HardwarePwm(std::vector<uint8_t>& pins);
 
     /**
      * @brief Construct PWM instance with custom configuration
-     * @param pins Array of GPIO pins to control
-     * @param pin_count Number of pins in the array
+     * @param pins Vector of GPIO pins to control
      * @param config PWM configuration parameters
      */
-    Esp32HardwarePwm(const std::array<uint8_t, N>& pins, const Esp32HwPwmConfig& config);
+    Esp32HardwarePwm(std::vector<uint8_t>& pins, const Esp32HwPwmConfig& config);
 
     /**
      * @brief Destructor - automatically releases all allocated resources
@@ -157,7 +152,6 @@ public:
      * @param update_immediately Apply changes immediately (default: true)
      * @return true if successful, false otherwise
      */
-    template <size_t N>
     bool setDutyPercent(uint8_t pin, float percentage, bool update_immediately = true);
 
     /**
@@ -304,8 +298,10 @@ public:
                        bool wait_for_completion = false);
 
 private:
-    std::array<PwmChannelInfo, N> channels_; // Fixed-size array for channel info
-    Esp32PwmConfig<N> config_;
+    std::vector<PwmChannelInfo> channels_;
+    std::vector<uint8_t> pins_;
+    size_t num_channels_ = 0;
+    Esp32HwPwmConfig config_;
     bool initialized_;
     bool fade_installed_;
     uint8_t timer_num_;
@@ -317,7 +313,7 @@ private:
      * @param pin_count Number of pins
      * @return true if successful, false otherwise
      */
-    bool initialize(const uint8_t* pins, uint8_t pin_count);
+    bool initialize(const std::vector<uint8_t>& pins);
 
     /**
      * @brief Find channel index by pin number

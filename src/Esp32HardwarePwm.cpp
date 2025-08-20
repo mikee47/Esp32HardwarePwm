@@ -96,22 +96,19 @@ typedef struct {
 
 
 
-
 // static_assert(ChannelStart + pins.size() <= CHANNEL_MAX, "Channel range exceeds available channels!");
 //=============================================================================
 // Esp32HardwarePwm Implementation
 //=============================================================================
 
-template <unsigned int N>
-Esp32HardwarePwm<N>::Esp32HardwarePwm(const std::array<uint8_t, N>& pins)
+Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins)
     : initialized_(false), fade_installed_(false) {
-    Esp32HwPwmConfig<N> default_config;
+    Esp32HwPwmConfig default_config;
     config_ = default_config;
     initialized_ = initialize(pins);
 }
 
-template <unsigned int N>
-Esp32HardwarePwm<N>::Esp32HardwarePwm(const std::array<uint8_t, N>& pins, const Esp32HwPwmConfig<N>& config)
+Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Esp32HwPwmConfig& config)
     : config_(config), initialized_(false), fade_installed_(false) {
     debug_i("Esp32HardwarePwm constructor called with parameters:");
     debug_i("  pin_count: %zu", pins.size());
@@ -119,16 +116,15 @@ Esp32HardwarePwm<N>::Esp32HardwarePwm(const std::array<uint8_t, N>& pins, const 
     for (size_t i = 0; i < pins.size(); ++i) {
         debug_i("    pins[%zu]: %d", i, pins[i]);
     }
-    debug_i("  config.frequency: %d", config.frequency);
-    debug_i("  config.resolution: %d", config.resolution);
-    debug_i("  config.speed_mode: %d", config.speed_mode);
-    debug_i("  config.clock_source: %d", config.clock_source);
-    debug_i("  config.use_phase_shift: %d", config.use_phase_shift);
+    debug_i("  config.frequency: %d", config.timer.frequency);
+    debug_i("  config.resolution: %d", config.timer.resolution);
+    debug_i("  config.speed_mode: %d", config.timer.speed_mode);
+    debug_i("  config.clock_source: %d", config.timer.clk_cfg);
+    debug_i("  config.use_fade: %s", config.modulation.mode == SpreadSpectrumMode::ON ? "ON" : config.modulation.mode==SpreadSpectrumMode::OFF ? "OFF" : "AUTO");
     initialized_ = initialize(pins);
 }
 
-template <unsigned int N>
-Esp32HardwarePwm<N>::~Esp32HardwarePwm() {
+Esp32HardwarePwm::~Esp32HardwarePwm() {
     
     if (fade_installed_) {
         ledc_fade_func_uninstall();
@@ -143,7 +139,7 @@ Esp32HardwarePwm<N>::~Esp32HardwarePwm() {
         }
         
         ledc_timer_config_t timer_config={
-            .timer_num = config_.timer_num,
+            .timer_num = config_.timer.timer_num,
             .deconfigure = true
         };
         // Esp32HardwarePwm Implementation
@@ -154,13 +150,14 @@ Esp32HardwarePwm<N>::~Esp32HardwarePwm() {
     }
 }
 
-bool Esp32HardwarePwm::initialize(const std::array<uint8_t, N>& pins) {
+bool Esp32HardwarePwm::initialize(const std::vector<uint8_t>& pins) {
     // should this be an assert or a runtime check?
-    static_assert(N <= SOC_LEDC_CHANNEL_NUM, "Pin count exceeds available LEDC channels");
-    static_assert(N > 0, "Pin count must be positive");
-    static_assert(N + config_.channel_start < SOC_LEDC_CHANNEL_NUM, "Channel range exceeds available channels");
+    uint8_t n = pins.size();
+    if (n<= SOC_LEDC_CHANNEL_NUM) debug_e("Pin count exceeds available LEDC channels");
+    if(n > 0) debug_e("Pin count must be positive");
+    if(n + config_.channel_start < SOC_LEDC_CHANNEL_NUM) debug_e("Channel range exceeds available channels");
     debug_i("Esp32HardwarePwm::initialize");
-    
+
     // Enable LEDC peripheral
     periph_module_enable(PERIPH_LEDC_MODULE);
     
@@ -174,10 +171,10 @@ bool Esp32HardwarePwm::initialize(const std::array<uint8_t, N>& pins) {
     for (uint8_t i = 0; i < pins.size() ; ++i) {
         ledc_channel_config_t channel_config = {
             .gpio_num = pins.at(i),
-            .speed_mode = config_.speed_mode,
-            .channel = channel_ + i,
+            .speed_mode = config_.timer.speed_mode,
+            .channel = (ledc_channel_t)(channel_ + i),
             .intr_type = LEDC_INTR_DISABLE,
-            .timer_sel = config_.timer_num,
+            .timer_sel = config_.timer.timer_num,
             .duty = 0,
             .hpoint = (config_.phase_shift.mode == PhaseShiftMode::MANUAL)
                             ? config_.phase_shift.manual_hpoints.at(i)
@@ -278,7 +275,7 @@ bool Esp32HardwarePwm::setFrequency(uint32_t frequency) {
     esp_err_t result = ledc_set_freq(first_channel.speed_mode, first_channel.timer, frequency);
     
     if (result == ESP_OK) {
-        config_.frequency = frequency;
+        config_.timer.frequency = frequency;
         debug_i("Set frequency to %d Hz", frequency);
         return true;
     } else {
@@ -307,11 +304,11 @@ uint32_t Esp32HardwarePwm::getPeriod() const {
 }
 
 uint32_t Esp32HardwarePwm::getMaxDuty() const {
-    return maxDutyForResolution(config_.resolution);
+    return maxDutyForResolution(config_.timer.resolution);
 }
 
 uint8_t Esp32HardwarePwm::getResolution() const {
-    return static_cast<uint8_t>(config_.resolution);
+    return static_cast<uint8_t>(config_.timer.resolution);
 }
 
 void Esp32HardwarePwm::update() {
@@ -487,7 +484,7 @@ int Esp32HardwarePwm::findChannelIndex(uint8_t pin) const {
 }
 
 int Esp32HardwarePwm::calculateHpoint(uint8_t channel_index) const {
-    if (!config_.use_phase_shift || channels_.empty()) {
+    if (config_.phase_shift.mode==PhaseShiftMode::OFF || channels_.empty()) {
         return 0;
     }
     
@@ -498,9 +495,10 @@ int Esp32HardwarePwm::calculateHpoint(uint8_t channel_index) const {
 bool Esp32HardwarePwm::applyDutyChange(const PwmChannelInfo& channel_info, uint32_t duty, 
                                        bool update_immediately) {
     esp_err_t result;
-    
-    if (config_.use_phase_shift) {
-        result = ledc_set_duty_with_hpoint(channel_info.speed_mode, channel_info.channel, 
+
+    // todo: do we need to set the hpoint here?
+    if (config_.phase_shift.mode != PhaseShiftMode::OFF) {
+        result = ledc_set_duty_with_hpoint(channel_info.speed_mode, channel_info.channel,
                                           duty, calculateHpoint(&channel_info - &channels_[0]));
     } else {
         result = ledc_set_duty(channel_info.speed_mode, channel_info.channel, duty);
