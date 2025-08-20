@@ -35,30 +35,13 @@
 #include <cstdint>
 #include <vector>
 #include <memory>
-#include <mutex>
 #include <driver/ledc.h>
 #include <hal/ledc_types.h>
 #include <soc/soc_caps.h>
 #include "Esp32PwmPlatform.h"
+#include <array>
 
 #define PWM_BAD_CHANNEL 0xff ///< Invalid PWM channel
-
-/**
- * @brief ESP32 PWM Configuration parameters
- */
-struct Esp32PwmConfig {
-    uint32_t frequency = 1000;                          ///< PWM frequency in Hz (default 1kHz)
-    ledc_timer_bit_t resolution = LEDC_TIMER_10_BIT;    ///< Duty resolution (1-20 bits, default 10-bit)
-    ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;       ///< Speed mode (high-speed only on ESP32)
-    ledc_clk_cfg_t clock_source = LEDC_AUTO_CLK;       ///< Clock source selection
-    bool use_phase_shift = false;                       ///< Enable phase shifting for EMI reduction
-    bool enable_fade = false;                          ///< Enable hardware fade functionality
-    bool spreadSpectrum=false;
-    uint8_t modulationWidth=0;
-    uint8_t subsampling=0;
-    uint8_t stepsize=0;
-
-};
 
 /**
  * @brief PWM Channel information
@@ -72,57 +55,49 @@ struct PwmChannelInfo {
     bool is_active = false;                           ///< Channel active status
 };
 
-#include <array>
-#include <cstdint>
 
-enum class PhaseShiftMode : uint8_t {
-    OFF,
-    AUTO,
-    MANUAL
-};
+/**
+ * @brief ESP32 PWM Configuration parameters
+ */
+
+enum class PhaseShiftMode : uint8_t { OFF, AUTO, MANUAL };
+enum class SpreadSpectrumMode : uint8_t { OFF, ON };
 
 template <size_t N>
 struct Esp32HwPwmPhaseShiftConfig {
-    PhaseShiftMode mode;
-    std::array<int, N> manual_hpoints; // Only used if mode == MANUAL
-};
-
-enum class SpreadSpectrumMode : uint8_t {
-    OFF,
-    ON
+    PhaseShiftMode mode = PhaseShiftMode::OFF;
+    std::array<int, N> manual_hpoints = {};
 };
 
 struct Esp32HwPwmModulationConfig {
-    SpreadSpectrumMode mode;
-    uint8_t modulationWidthPercent;
-    uint8_t modulationSubsampling;
-    uint8_t modulationStepsizePercent;
+    SpreadSpectrumMode mode = SpreadSpectrumMode::OFF;
+    uint8_t modulationWidthPercent = 0;
+    uint8_t modulationSubsampling = 0;
+    uint8_t modulationStepsizePercent = 0;
+};
+
+struct Esp32HwPwmTimerConfig {
+    ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;
+    ledc_timer_bit_t duty_resolution = LEDC_TIMER_10_BIT;
+    ledc_timer_t timer_num = LEDC_TIMER_0;
+    uint32_t freq_hz = 1000;
+    ledc_clk_cfg_t clk_cfg = LEDC_AUTO_CLK;
 };
 
 template <size_t N>
-struct Esp32HwPwmTimerConfig{
-    ledc_mode_t speed_mode;
-    ledc_timer_bit_t duty_resolution;
-    ledc_timer_t timer_num;
-    uint32_t freq_hz;
-    ledc_clk_cfg_t clk_cfg;
-};
-
 struct Esp32HwPwmConfig {
-    uint8_t channel_start;
-    Esp32TimerConfig timer_config;
-    Esp32HwPwmPhaseShiftConfig<N> phase_shift;
-    Esp32HwPwmModulationConfig modulation;
+    uint8_t channel_start = 0;
+    Esp32HwPwmTimerConfig timer_config = {};
+    Esp32HwPwmPhaseShiftConfig<N> phase_shift = {};
+    Esp32HwPwmModulationConfig modulation = {};
 };
 
 /**
  * @brief ESP32 Hardware PWM class
  * 
  * This class provides a C++ wrapper around the ESP32 LEDC PWM functionality.
- * It supports multiple independent PWM instances with automatic resource management.
  * 
  * Key features:
- * - Automatic channel and timer allocation
  * - Support for different frequencies and duty resolutions
  * - Phase shifting for EMI reduction
  * - Hardware fade support
@@ -131,6 +106,7 @@ struct Esp32HwPwmConfig {
  * 
  * @note This class is designed specifically for ESP32 architecture
  */
+template <size_t N>
 class Esp32HardwarePwm {
 public:
     /**
@@ -138,7 +114,7 @@ public:
      * @param pins Array of GPIO pins to control
      * @param pin_count Number of pins in the array
      */
-    Esp32HardwarePwm(const uint8_t* pins, uint8_t pin_count);
+    Esp32HardwarePwm(const std::array<uint8_t, N>& pins);
 
     /**
      * @brief Construct PWM instance with custom configuration
@@ -146,7 +122,7 @@ public:
      * @param pin_count Number of pins in the array
      * @param config PWM configuration parameters
      */
-    Esp32HardwarePwm(const uint8_t* pins, uint8_t pin_count, const Esp32PwmConfig& config);
+    Esp32HardwarePwm(const std::array<uint8_t, N>& pins, const Esp32HwPwmConfig& config);
 
     /**
      * @brief Destructor - automatically releases all allocated resources
@@ -181,6 +157,7 @@ public:
      * @param update_immediately Apply changes immediately (default: true)
      * @return true if successful, false otherwise
      */
+    template <size_t N>
     bool setDutyPercent(uint8_t pin, float percentage, bool update_immediately = true);
 
     /**
@@ -327,11 +304,12 @@ public:
                        bool wait_for_completion = false);
 
 private:
-    std::vector<PwmChannelInfo> channels_;
-    Esp32PwmConfig config_;
+    std::array<PwmChannelInfo, N> channels_; // Fixed-size array for channel info
+    Esp32PwmConfig<N> config_;
     bool initialized_;
     bool fade_installed_;
-    mutable std::mutex instance_mutex_;
+    uint8_t timer_num_;
+
 
     /**
      * @brief Initialize PWM instance

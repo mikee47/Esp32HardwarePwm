@@ -74,61 +74,61 @@ typedef struct {
 } ledc_channel_config_t;
 
 typedef struct {
-    ledc_mode_t speed_mode;                //!< LEDC speed speed_mode, high-speed mode (only exists on esp32) or low-speed mode */
-    ledc_timer_bit_t duty_resolution;      //!< LEDC channel duty resolution */
-    ledc_timer_t  timer_num;               //!< The timer source of channel (0 - LEDC_TIMER_MAX-1) */
-    uint32_t freq_hz;                      //!< LEDC timer frequency (Hz) */
+    ledc_mode_t speed_mode;                //!< LEDC speed speed_mode, high-speed mode (only exists on esp32) or low-speed mode 
+    ledc_timer_bit_t duty_resolution;      //!< LEDC channel duty resolution 
+    ledc_timer_t  timer_num;               //!< The timer source of channel (0 - LEDC_TIMER_MAX-1) 
+    uint32_t freq_hz;                      //!< LEDC timer frequency (Hz) 
     ledc_clk_cfg_t clk_cfg;                //!< Configure LEDC source clock from ledc_clk_cfg_t.
                                            //   Note that LEDC_USE_RC_FAST_CLK and LEDC_USE_XTAL_CLK are
                                            //   non-timer-specific clock sources. You can not have one LEDC timer uses
                                            //   RC_FAST_CLK as the clock source and have another LEDC timer uses XTAL_CLK
                                            //   as its clock source. All chips except esp32 and esp32s2 do not have
                                            //   timer-specific clock sources, which means clock source for all timers
-                                           //   must be the same one. */
-    bool deconfigure;                      // Set this field to de-configure a LEDC timer which has been configured before
-                                           //     Note that it will not check whether the timer wants to be de-configured
-                                                is binded to any channel. Also, the timer has to be paused first before
-                                                it can be de-configured.
-                                                When this field is set, duty_resolution, freq_hz, clk_cfg fields are ignored. */
+                                           //   must be the same one. 
+    bool deconfigure;                      //   Set this field to de-configure a LEDC timer which has been configured before
+                                           //   Note that it will not check whether the timer wants to be de-configured
+                                           //   is binded to any channel. Also, the timer has to be paused first before
+                                           //   it can be de-configured.
+                                           //   When this field is set, duty_resolution, freq_hz, clk_cfg fields are ignored. 
 } ledc_timer_config_t;
 */
 
-ledc_timer_config_t
+
+
+
+
+// static_assert(ChannelStart + pins.size() <= CHANNEL_MAX, "Channel range exceeds available channels!");
 //=============================================================================
 // Esp32HardwarePwm Implementation
 //=============================================================================
 
-Esp32HardwarePwm::Esp32HardwarePwm(const uint8_t* pins, uint8_t pin_count)
+template <unsigned int N>
+Esp32HardwarePwm<N>::Esp32HardwarePwm(const std::array<uint8_t, N>& pins)
     : initialized_(false), fade_installed_(false) {
-    
-    // Use default configuration
-    Esp32PwmConfig default_config;
+    Esp32HwPwmConfig<N> default_config;
     config_ = default_config;
-    
-    initialized_ = initialize(pins, pin_count);
+    initialized_ = initialize(pins);
 }
 
-Esp32HardwarePwm::Esp32HardwarePwm(const uint8_t* pins, uint8_t pin_count, 
-                                   const Esp32PwmConfig& config)
+template <unsigned int N>
+Esp32HardwarePwm<N>::Esp32HardwarePwm(const std::array<uint8_t, N>& pins, const Esp32HwPwmConfig<N>& config)
     : config_(config), initialized_(false), fade_installed_(false) {
-
     debug_i("Esp32HardwarePwm constructor called with parameters:");
-    debug_i("  pin_count: %d", pin_count);
+    debug_i("  pin_count: %zu", pins.size());
     debug_i("  pins: ");
-    for (uint8_t i = 0; i < pin_count; ++i) {
-        debug_i("    pins[%d]: %d", i, pins[i]);
+    for (size_t i = 0; i < pins.size(); ++i) {
+        debug_i("    pins[%zu]: %d", i, pins[i]);
     }
     debug_i("  config.frequency: %d", config.frequency);
     debug_i("  config.resolution: %d", config.resolution);
     debug_i("  config.speed_mode: %d", config.speed_mode);
     debug_i("  config.clock_source: %d", config.clock_source);
     debug_i("  config.use_phase_shift: %d", config.use_phase_shift);
-
-    initialized_ = initialize(pins, pin_count);
+    initialized_ = initialize(pins);
 }
 
-Esp32HardwarePwm::~Esp32HardwarePwm() {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
+template <unsigned int N>
+Esp32HardwarePwm<N>::~Esp32HardwarePwm() {
     
     if (fade_installed_) {
         ledc_fade_func_uninstall();
@@ -142,47 +142,54 @@ Esp32HardwarePwm::~Esp32HardwarePwm() {
             }
         }
         
-        // Release resources
-        Esp32PwmResourceManager::getInstance().releaseChannels(channels_);
+        ledc_timer_config_t timer_config={
+            .timer_num = config_.timer_num,
+            .deconfigure = true
+        };
+        // Esp32HardwarePwm Implementation
+        //=============================================================================
+
+        // Constructors and destructor already templated above
+
     }
 }
 
-bool Esp32HardwarePwm::initialize(const uint8_t* pins, uint8_t pin_count) {
+bool Esp32HardwarePwm::initialize(const std::array<uint8_t, N>& pins) {
     // should this be an assert or a runtime check?
+    static_assert(N <= SOC_LEDC_CHANNEL_NUM, "Pin count exceeds available LEDC channels");
+    static_assert(N > 0, "Pin count must be positive");
+    static_assert(N + config_.channel_start < SOC_LEDC_CHANNEL_NUM, "Channel range exceeds available channels");
     debug_i("Esp32HardwarePwm::initialize");
-    if (pin_count == 0 || pin_count > SOC_LEDC_CHANNEL_NUM) {
-        debug_i("Invalid pin count: %d", pin_count);
-        return false;
-    }
     
     // Enable LEDC peripheral
     periph_module_enable(PERIPH_LEDC_MODULE);
     
     // Allocate channels from resource manager
     debug_i("Esp32HardwarePwm::initialize - getting Channels");
-    channels_ = Esp32PwmResourceManager::getInstance().allocateChannels(pins, pin_count, config_);
-    if (channels_.empty()) {
-        debug_e("Failed to allocate PWM channels");
-        return false;
-    }
     
     // List allocated channels for debugging
     
     // Configure each channel
-    for (uint8_t i = 0;i<pin_count;i++) {
+    uint8_t channel_ = config_.channel_start;
+    for (uint8_t i = 0; i < pins.size() ; ++i) {
         ledc_channel_config_t channel_config = {
-            .gpio_num = channels_[i].gpio_pin,
+            .gpio_num = pins.at(i),
             .speed_mode = config_.speed_mode,
-            .channel = channels_[i].channel,
+            .channel = channel_ + i,
             .intr_type = LEDC_INTR_DISABLE,
-            .timer_sel = channels_[i].timer,
+            .timer_sel = config_.timer_num,
             .duty = 0,
-            .hpoint = config_.use_phase_shift ? calculateHpoint(i) : (int)0
+            .hpoint = (config_.phase_shift.mode == PhaseShiftMode::MANUAL)
+                            ? config_.phase_shift.manual_hpoints.at(i)
+                    : (config_.phase_shift.mode == PhaseShiftMode::AUTO)
+                            ? calculateHpoint(i)
+                    : 0
         };
         debug_i("Channel config: gpio_num=%d, speed_mode=%d, channel=%d, timer_sel=%d, duty=%d, hpoint=%d",
             channel_config.gpio_num, channel_config.speed_mode, channel_config.channel,
             channel_config.timer_sel, channel_config.duty, channel_config.hpoint);
-        esp_err_t result = ledc_channel_config(&channel_config);
+        
+            esp_err_t result = ledc_channel_config(&channel_config);
         if (result != ESP_OK) {
             debug_e("Failed to configure channel %d: %s", channels_[i].channel, esp_err_to_name(result));
             return false;
@@ -205,7 +212,7 @@ bool Esp32HardwarePwm::initialize(const uint8_t* pins, uint8_t pin_count) {
 }
 
 bool Esp32HardwarePwm::setDuty(uint8_t pin, uint32_t duty, bool update_immediately) {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
+    
     
     if (!initialized_) {
         debug_e("PWM not initialized");
@@ -229,7 +236,6 @@ bool Esp32HardwarePwm::setDuty(uint8_t pin, uint32_t duty, bool update_immediate
 }
 
 uint32_t Esp32HardwarePwm::getDuty(uint8_t pin) const {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
     
     if (!initialized_) {
         return 0;
@@ -262,7 +268,6 @@ float Esp32HardwarePwm::getDutyPercent(uint8_t pin) const {
 }
 
 bool Esp32HardwarePwm::setFrequency(uint32_t frequency) {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
     
     if (!initialized_ || channels_.empty()) {
         return false;
@@ -283,7 +288,6 @@ bool Esp32HardwarePwm::setFrequency(uint32_t frequency) {
 }
 
 uint32_t Esp32HardwarePwm::getFrequency() const {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
     
     if (!initialized_ || channels_.empty()) {
         return 0;
@@ -311,7 +315,6 @@ uint8_t Esp32HardwarePwm::getResolution() const {
 }
 
 void Esp32HardwarePwm::update() {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
     
     if (!initialized_) {
         return;
@@ -326,7 +329,6 @@ void Esp32HardwarePwm::update() {
 }
 
 bool Esp32HardwarePwm::start(uint8_t pin) {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
     
     if (!initialized_) {
         return false;
@@ -343,8 +345,6 @@ bool Esp32HardwarePwm::start(uint8_t pin) {
 }
 
 bool Esp32HardwarePwm::stop(uint8_t pin, uint8_t idle_level) {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
-    
     if (!initialized_) {
         return false;
     }
@@ -366,7 +366,7 @@ bool Esp32HardwarePwm::stop(uint8_t pin, uint8_t idle_level) {
 }
 
 void Esp32HardwarePwm::startAll() {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
+    
     
     for (auto& channel : channels_) {
         channel.is_active = true;
@@ -374,7 +374,7 @@ void Esp32HardwarePwm::startAll() {
 }
 
 void Esp32HardwarePwm::stopAll(uint8_t idle_level) {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
+    
     
     for (auto& channel : channels_) {
         ledc_stop(channel.speed_mode, channel.channel, idle_level);
@@ -383,7 +383,7 @@ void Esp32HardwarePwm::stopAll(uint8_t idle_level) {
 }
 
 const PwmChannelInfo* Esp32HardwarePwm::getChannelInfo(uint8_t pin) const {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
+    
     
     int channel_idx = findChannelIndex(pin);
     if (channel_idx < 0) {
@@ -402,7 +402,7 @@ bool Esp32HardwarePwm::isInitialized() const {
 }
 
 bool Esp32HardwarePwm::enableFade() {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
+    
     
     if (fade_installed_) {
         return true;
@@ -420,7 +420,7 @@ bool Esp32HardwarePwm::enableFade() {
 }
 
 void Esp32HardwarePwm::disableFade() {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
+    
     
     if (fade_installed_) {
         ledc_fade_func_uninstall();
@@ -431,7 +431,7 @@ void Esp32HardwarePwm::disableFade() {
 
 bool Esp32HardwarePwm::fadeToValue(uint8_t pin, uint32_t target_duty, uint32_t fade_time_ms, 
                                    bool wait_for_completion) {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
+    
     
     if (!initialized_ || !fade_installed_) {
         debug_e("PWM not initialized or fade not enabled");
