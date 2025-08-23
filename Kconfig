@@ -1,0 +1,98 @@
+menu "ESP32 Hardware PWM Configuration"
+
+    config ESP32_PWM_MAX_INSTANCES
+        int "Maximum number of PWM instances"
+        range 1 16
+        default 8
+        help
+            Maximum number of PWM instances that can be created simultaneously.
+            Each instance can control multiple channels, but this limits the total
+            number of instances to prevent resource exhaustion.
+
+    config ESP32_PWM_DEFAULT_FREQUENCY
+        int "Default PWM frequency (Hz)"
+        range 1 40000000
+        default 1000
+        help
+            Default PWM frequency in Hz when no frequency is specified.
+            Higher frequencies allow for higher resolution but may consume more CPU.
+
+    config ESP32_PWM_DEFAULT_RESOLUTION
+        int "Default PWM resolution (bits)"
+        range 1 20
+        default 10
+        help
+            Default PWM duty resolution in bits. Higher resolution provides
+            finer control but limits maximum frequency.
+            Note: Maximum resolution depends on the ESP32 variant:
+            - ESP32: up to 20 bits
+            - ESP32-C3/S2/S3: up to 14 bits
+
+    config ESP32_PWM_ENABLE_FADE_BY_DEFAULT
+        bool "Enable hardware fade functionality by default"
+        default n
+        help
+            When enabled, PWM instances will automatically enable hardware fade
+            functionality during initialization. This uses additional memory
+            and interrupts but provides smooth transitions.
+
+    config ESP32_PWM_ENABLE_PHASE_SHIFT_BY_DEFAULT
+        bool "Enable phase shifting by default"
+        default n
+        help
+            When enabled, PWM channels will use phase shifting to distribute
+            rising edges evenly across the PWM period. This reduces EMI and
+            peak current draw but may affect timing-sensitive applications.
+
+    config ESP32_PWM_THREAD_SAFE
+        bool "Enable thread-safe operations"
+        default y
+        help
+            Enable mutex-based thread safety for PWM operations. Recommended
+            for multi-threaded applications but adds slight overhead.
+
+    config ESP32_PWM_DEBUG_VERBOSE
+        bool "Enable verbose debug output"
+        default n
+        help
+            Enable detailed debug output for PWM operations. Useful for
+            development and troubleshooting but increases code size and
+            may affect performance.
+
+    choice ESP32_PWM_DEFAULT_SPEED_MODE
+        prompt "Default LEDC speed mode"
+        default ESP32_PWM_LOW_SPEED_MODE
+        help
+            Default LEDC speed mode for PWM instances.
+            
+        config ESP32_PWM_LOW_SPEED_MODE
+            bool "Low Speed Mode"
+            help
+                Use low speed mode by default. Available on all ESP32 variants.
+                Provides 8 channels and 4 timers.
+                
+        config ESP32_PWM_HIGH_SPEED_MODE
+            bool "High Speed Mode"
+            depends on IDF_TARGET_ESP32
+            help
+                Use high speed mode by default. Only available on ESP32.
+                Provides additional 8 channels and 4 timers with glitch-free updates.
+                Note: High speed mode is only available on the original ESP32.
+    endchoice
+
+    config ESP32_PWM_RESOURCE_CHECK_STRICT
+        bool "Strict resource checking"
+        default y
+        help
+            Enable strict checking of PWM resource allocation. When enabled,
+            the component will refuse to initialize if insufficient resources
+            are available. When disabled, it will attempt partial initialization.
+
+    config ESP32_PWM_AUTO_PERIPH_ENABLE
+        bool "Automatically enable LEDC peripheral"
+        default y
+        help
+            Automatically enable the LEDC peripheral when creating PWM instances.
+            Disable this if you want to manage peripheral enabling manually.
+
+endmenu

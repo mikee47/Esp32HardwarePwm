@@ -1,0 +1,46 @@
+{
+    "name": "LedControl",
+    "version": "1.0.0",
+    "description": "High-performance ESP32 LEDC PWM control library for Sming",
+    "keywords": [
+        "esp32",
+        "ledc",
+        "pwm",
+        "led",
+        "servo",
+        "motor",
+        "hardware"
+    ],
+    "authors": [
+        {
+            "name": "pljakobs",
+            "email": "pjakobs@ceneo.de",
+            "maintainer": true
+        }
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/SmingHub/Sming.git",
+        "branch": "develop"
+    },
+    "license": "LGPL-3.0",
+    "homepage": "https://sming.readthedocs.io/",
+    "dependencies": {
+        "sming": ">=4.7.0",
+        "esp-idf": ">=4.4.0"
+    },
+    "frameworks": ["sming"],
+    "platforms": ["espressif32"],
+    "build": {
+        "flags": [
+            "-std=c++17"
+        ],
+        "srcFilter": [
+            "+<src/>",
+            "+<include/>"
+        ]
+    },
+    "export": {
+        "include": "src/include"
+    }
+}
