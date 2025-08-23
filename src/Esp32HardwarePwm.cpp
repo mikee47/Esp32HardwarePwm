@@ -280,7 +280,7 @@ bool Esp32HardwarePwm::setDuty(uint8_t pin, uint32_t duty, bool update_immediate
         duty = max_duty;
     }
 
-    debug_i("Setting duty for pin %d: %d", pin, duty);
+    // debug_i("Setting duty for pin %d: %d", pin, duty);
 
     getPinConfig(pin)->currentDuty = duty;
 
@@ -339,7 +339,7 @@ bool Esp32HardwarePwm::setFrequency(uint32_t frequency) {
     
     if (result == ESP_OK) {
         timer_.frequency = frequency;
-        debug_i("Set frequency to %d Hz", frequency);
+        // debug_i("Set frequency to %d Hz", frequency);
         return true;
     } else {
         debug_e("Failed to set frequency: %s", esp_err_to_name(result));
@@ -505,12 +505,12 @@ bool Esp32HardwarePwm::applyChange(uint8_t pin, bool update_immediately) {
         return false;
     }
 
-    debug_i("   applying duty %d and hpoint %d to pin %d on channel %d", pinConfig->currentDuty, pinConfig->hpoint, pin, pinConfig->channel);
+    // debug_i("   applying duty %d and hpoint %d to pin %d on channel %d", pinConfig->currentDuty, pinConfig->hpoint, pin, pinConfig->channel);
 
     // Set duty, with hpoint if phase shift is enabled
     
     if (phaseShift_.mode == PhaseShiftMode::OFF) {
-        debug_i("Setting duty for pin %d to %d", pin, pinConfig->currentDuty);
+        // debug_i("Setting duty for pin %d to %d", pin, pinConfig->currentDuty);
         result = ledc_set_duty(
             timer_.speed_mode,
             pinConfig->channel,
