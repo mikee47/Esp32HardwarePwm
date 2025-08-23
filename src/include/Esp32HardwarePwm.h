@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include <SmingCore.h>
 #include <cstdint>
 #include <vector>
 #include <memory>
@@ -39,6 +40,7 @@
 #include <hal/ledc_types.h>
 #include <soc/soc_caps.h>
 #include "Esp32PwmPlatform.h"
+#include <esp_timer.h>
 #include <array>
 
 #define PWM_BAD_CHANNEL 0xff ///< Invalid PWM channel
@@ -79,8 +81,8 @@ struct Esp32HwPwmPhaseShiftConfig {
 struct Esp32HwPwmSpreadSpectrumConfig {
     SpreadSpectrumMode mode = SpreadSpectrumMode::OFF;
     uint8_t WidthPercent = 0;
-    uint8_t Subsampling = 0;
-    uint8_t StepsizePercent = 0;
+    uint16_t Subsampling = 0;
+    uint8_t StepsizeHz = 0;
 };
 
 struct Esp32HwPwmTimerConfig {
@@ -314,7 +316,11 @@ private:
     Esp32HwPwmSpreadSpectrumConfig spreadSpectrum_;
     Esp32HwPwmPhaseShiftConfig phaseShift_;
     std::vector<HwPwmPinConfig> pins_;
-    
+
+    int min_freq, max_freq, step_hz, interval_us;
+    int current_freq=0;
+    int direction=1;
+
     //std::vector<uint8_t> pins_;
     //size_t num_channels_ = 0;
     //Esp32HwPwmConfig config_;
@@ -362,6 +368,16 @@ private:
      * @return true if successful, false otherwise
      */
     bool applyChange(uint8_t pin,  bool update_immediately);
-    };
+
+    bool setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectrumConfig* config);
+
+    static void IRAM_ATTR timerIsr(void* arg);
+    /**
+     * @brief Handle spread spectrum modulation
+     */
+    void handleSpreadSpectrum();
+
+};
+
 
 /** @} */

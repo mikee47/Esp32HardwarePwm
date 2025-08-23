@@ -173,7 +173,7 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Esp32HwPwmC
         spreadSpectrum_.mode,
         spreadSpectrum_.WidthPercent,
         spreadSpectrum_.Subsampling,
-        spreadSpectrum_.StepsizePercent);
+        spreadSpectrum_.StepsizeHz);
     debug_i("  PhaseShiftMode: %d", static_cast<int>(phaseShift_.mode));
     debug_i("  Channel start: %d", config.channelStart);
     debug_i("  Pins : %i", pins.size());
@@ -231,6 +231,11 @@ bool Esp32HardwarePwm::initialize() {
     // Allocate channels from resource manager
     debug_i("Esp32HardwarePwm::initialize - getting Channels");
 
+    if (spreadSpectrum_.mode != SpreadSpectrumMode::OFF) {
+        // Configure spread spectrum
+        debug_i("Configuring spread spectrum");
+        setupSpreadSpectrum(timer_.frequency, &spreadSpectrum_);
+    }
 
     // Configure each channel
     for (size_t i = 0; i < pins_.size(); ++i) {
@@ -534,4 +539,58 @@ bool Esp32HardwarePwm::applyChange(uint8_t pin, bool update_immediately) {
     }
 
     return true;
+}
+
+bool Esp32HardwarePwm::setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectrumConfig* config) {
+   // Validate and apply spread spectrum configuration
+    if (config) {
+        spreadSpectrum_ = *config;
+    }
+
+    // Pre-calculate values
+    min_freq = frequency - (frequency * spreadSpectrum_.WidthPercent / 100);
+    max_freq = frequency + (frequency * spreadSpectrum_.WidthPercent / 100);
+    step_hz = spreadSpectrum_.StepsizeHz;
+    interval_us = 1000000 *  spreadSpectrum_.Subsampling/frequency;
+
+    debug_i("Spread spectrum configuration: %d Hz, %d%%, %d Hz",
+             frequency, spreadSpectrum_.WidthPercent, spreadSpectrum_.StepsizeHz);
+    debug_i("subsampling: %d, frequency: %d",
+             spreadSpectrum_.Subsampling, frequency);
+    debug_i("spread spectrum parameters: min_freq=%d, max_freq=%d, step_hz=%d, interval_µs=%d",
+             min_freq, max_freq, step_hz, interval_us);
+
+    current_freq = timer_.frequency;
+    direction = 1;
+
+    esp_timer_create_args_t timer_args = {
+        .callback = &Esp32HardwarePwm::timerIsr,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "SpreadSpectrum"
+    };
+    esp_timer_handle_t timer_handle;
+    esp_timer_create(&timer_args, &timer_handle);
+    esp_timer_start_periodic(timer_handle, interval_us);
+
+    if (!timer_handle) {
+        debug_e("Failed to create timer");
+        return false;
+    }
+
+    
+    return true;
+}
+
+void IRAM_ATTR Esp32HardwarePwm::timerIsr(void* arg) {
+    auto* self = static_cast<Esp32HardwarePwm*>(arg);
+    self->handleSpreadSpectrum();
+}
+
+void Esp32HardwarePwm::handleSpreadSpectrum() {
+    current_freq += direction * step_hz;
+
+    if (current_freq >= max_freq) direction = -1;
+    if (current_freq <= min_freq) direction = +1;
+    ledc_set_freq(timer_.speed_mode, timer_.timer_num, current_freq);
 }
