@@ -26,7 +26,7 @@
  ****/
 
 /** @defgroup   esp32_hw_pwm ESP32 Hardware PWM functions
- *  @brief      Provides ESP32 LEDC hardware pulse width modulation functions
+ *  @brief      Provides ESP32 LEDC hardware pulse width spread spectrum functions
  *  @{
 */
 
@@ -46,15 +46,23 @@
 /**
  * @brief PWM Channel information
  */
+/*
 struct PwmChannelInfo {
-    uint8_t gpio_pin = 0;                             ///< GPIO pin number
+    uint8_t gpioPin = 0;                             ///< GPIO pin number
     ledc_channel_t channel = LEDC_CHANNEL_0;          ///< LEDC channel
     ledc_timer_t timer = LEDC_TIMER_0;                ///< Associated timer
     ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;     ///< Speed mode
-    uint32_t current_duty = 0;                        ///< Current duty cycle
-    bool is_active = false;                           ///< Channel active status
+    uint32_t currentDuty = 0;                        ///< Current duty cycle
+    bool isActive = false;                           ///< Channel active status
 };
-
+*/
+struct HwPwmPinConfig{
+    uint8_t gpioPin=0;
+    ledc_channel_t  channel=LEDC_CHANNEL_0;
+    uint32_t currentDuty=0;
+    int hpoint=0;
+    bool isActive=false;
+};
 
 /**
  * @brief ESP32 PWM Configuration parameters
@@ -68,7 +76,7 @@ struct Esp32HwPwmPhaseShiftConfig {
     std::vector<int> manual_hpoints = {};
 };
 
-struct Esp32HwPwmModulationConfig {
+struct Esp32HwPwmSpreadSpectrumConfig {
     SpreadSpectrumMode mode = SpreadSpectrumMode::OFF;
     uint8_t WidthPercent = 0;
     uint8_t Subsampling = 0;
@@ -84,10 +92,10 @@ struct Esp32HwPwmTimerConfig {
 };
 
 struct Esp32HwPwmConfig {
-    uint8_t channel_start = 0;
+    uint8_t channelStart = 0;
     Esp32HwPwmTimerConfig timer = {};
-    Esp32HwPwmPhaseShiftConfig phase_shift = {};
-    Esp32HwPwmModulationConfig modulation = {};
+    Esp32HwPwmPhaseShiftConfig phaseShift = {};
+    Esp32HwPwmSpreadSpectrumConfig spreadSpectrum = {};
 };
 
 /**
@@ -143,7 +151,7 @@ public:
      * @param pin GPIO pin number
      * @return Current duty cycle value
      */
-    uint32_t getDuty(uint8_t pin) const;
+    uint32_t getDuty(uint8_t pin) ;
 
     /**
      * @brief Set duty cycle as percentage (0.0 to 100.0)
@@ -159,7 +167,7 @@ public:
      * @param pin GPIO pin number
      * @return Duty cycle percentage (0.0 to 100.0)
      */
-    float getDutyPercent(uint8_t pin) const;
+    float getDutyPercent(uint8_t pin) ;
 
     /**
      * @brief Arduino-style analogWrite function
@@ -170,6 +178,13 @@ public:
     bool analogWrite(uint8_t pin, uint32_t duty) {
         return setDuty(pin, duty);
     }
+
+    /** @brief change the phase shift for a given pin
+     * @param pin GPIO pin number
+     * @param phase_shift Phase shift value in points pwm resolution
+     * @return true if successful, false otherwise
+     */
+    bool setPhaseShift(uint8_t pin, uint32_t phase_shift, bool update_immediately=true) ;
 
     /**
      * @brief Change PWM frequency for all channels
@@ -211,7 +226,7 @@ public:
     uint8_t getResolution() const;
 
     /**
-     * @brief Update all PWM outputs (apply pending changes)
+     * @brief Update all PWM outputs (apply pending changes)auto pin : pins_
      * @note Only needed when update_immediately was set to false
      */
     void update();
@@ -243,23 +258,20 @@ public:
     void stopAll(uint8_t idle_level = 0);
 
     /**
-     * @brief Get channel info for a specific pin
-     * @param pin GPIO pin number
-     * @return Pointer to channel info, or nullptr if pin not found
+     * @brief Get total number of configured pins
+     * @return Number of pins
      */
-    const PwmChannelInfo* getChannelInfo(uint8_t pin) const;
-
-    /**
-     * @brief Get total number of configured channels
-     * @return Number of channels
-     */
-    uint8_t getChannelCount() const;
+    uint8_t getPinCount() const {
+        return static_cast<uint8_t>(pins_.size());
+    };
 
     /**
      * @brief Check if PWM instance is properly initialized
      * @return true if initialized, false otherwise
      */
-    bool isInitialized() const;
+    bool isInitialized() const {
+        return initialized_;
+    };
 
     // Hardware fade functions (if enabled in config)
 
@@ -298,13 +310,17 @@ public:
                        bool wait_for_completion = false);
 
 private:
-    std::vector<PwmChannelInfo> channels_;
-    std::vector<uint8_t> pins_;
-    size_t num_channels_ = 0;
-    Esp32HwPwmConfig config_;
+    Esp32HwPwmTimerConfig timer_;
+    Esp32HwPwmSpreadSpectrumConfig spreadSpectrum_;
+    Esp32HwPwmPhaseShiftConfig phaseShift_;
+    std::vector<HwPwmPinConfig> pins_;
+    
+    //std::vector<uint8_t> pins_;
+    //size_t num_channels_ = 0;
+    //Esp32HwPwmConfig config_;
     bool initialized_;
-    bool fade_installed_;
-    uint8_t timer_num_;
+    bool fadeInstalled_;
+    //uint8_t timer_num_;
 
 
     /**
@@ -313,21 +329,30 @@ private:
      * @param pin_count Number of pins
      * @return true if successful, false otherwise
      */
-    bool initialize(const std::vector<uint8_t>& pins);
+    bool initialize();
 
     /**
-     * @brief Find channel index by pin number
+     * @brief Get channel info for a specific pin
      * @param pin GPIO pin number
-     * @return Channel index, or -1 if not found
+     * @return Pointer to channel info, or nullptr if pin not found
      */
-    int findChannelIndex(uint8_t pin) const;
+    // Const version (add this)
+    HwPwmPinConfig* getPinConfig(uint8_t gpioPin)  {
+        for ( auto& pin : pins_) {
+            if (pin.gpioPin == gpioPin) return &pin;
+        }
+        return nullptr;
+    }
 
     /**
      * @brief Calculate hpoint for phase shifting
      * @param channel_index Index of the channel
      * @return Calculated hpoint value
      */
-    int calculateHpoint(uint8_t channel_index) const;
+    int calculateHpoint(uint8_t channel_index) const {
+        uint32_t max_duty = getMaxDuty();
+        return (int)(max_duty * channel_index) / pins_.size();
+    };
 
     /**
      * @brief Apply duty cycle change to hardware
@@ -336,8 +361,7 @@ private:
      * @param update_immediately Apply immediately
      * @return true if successful, false otherwise
      */
-    bool applyDutyChange(const PwmChannelInfo& channel_info, uint32_t duty, 
-                         bool update_immediately);
-};
+    bool applyChange(uint8_t pin,  bool update_immediately);
+    };
 
 /** @} */
