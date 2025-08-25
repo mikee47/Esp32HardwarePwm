@@ -280,7 +280,7 @@ bool Esp32HardwarePwm::setDuty(uint8_t pin, uint32_t duty, bool update_immediate
         duty = max_duty;
     }
 
-    debug_i("Setting duty for pin %d: %d", pin, duty);
+    // debug_i("Setting duty for pin %d: %d", pin, duty);
 
     getPinConfig(pin)->currentDuty = duty;  
 
@@ -344,7 +344,7 @@ bool Esp32HardwarePwm::setDutyChan(uint8_t channel, uint32_t duty, bool update_i
         ledc_update_duty(timer_.speed_mode, pins_.at(channel).channel);
     }
     return true;
-}
+}Esp32HardwarePwm/pull/2
 
 bool Esp32HardwarePwm::setDutyPercent(uint8_t pin, float percentage, bool update_immediately) {
     if (percentage < 0.0f) percentage = 0.0f;
@@ -393,7 +393,7 @@ bool Esp32HardwarePwm::setFrequency(uint32_t frequency) {
     
     if (result == ESP_OK) {
         timer_.frequency = frequency;
-        debug_i("Set frequency to %d Hz", frequency);
+        // debug_i("Set frequency to %d Hz", frequency);
         return true;
     } else {
         debug_e("Failed to set frequency: %s", esp_err_to_name(result));
