@@ -80,7 +80,7 @@ typedef struct {
     uint32_t freq_hz;                      //!< LEDC timer frequency (Hz) 
     ledc_clk_cfg_t clk_cfg;                //!< Configure LEDC source clock from ledc_clk_cfg_t.
                                            //   Note that LEDC_USE_RC_FAST_CLK and LEDC_USE_XTAL_CLK are
-                                           //   non-timer-specific clock sources. You can not have one LEDC timer uses
+                            /home/pjakobs/devel/esp_rgbww_firmware/Components/Esp32HardwarePwm/src/Esp32HardwarePwm.cpp               //   non-timer-specific clock sources. You can not have one LEDC timer uses
                                            //   RC_FAST_CLK as the clock source and have another LEDC timer uses XTAL_CLK
                                            //   as its clock source. All chips except esp32 and esp32s2 do not have
                                            //   timer-specific clock sources, which means clock source for all timers
@@ -282,9 +282,19 @@ bool Esp32HardwarePwm::setDuty(uint8_t pin, uint32_t duty, bool update_immediate
 
     debug_i("Setting duty for pin %d: %d", pin, duty);
 
-    getPinConfig(pin)->currentDuty = duty;
+    getPinConfig(pin)->currentDuty = duty;  
 
-    return applyChange(pin, update_immediately);
+    auto pinConfig = getPinConfig(pin);
+    if (!pinConfig) {
+        return false;
+    }
+    pinConfig->currentDuty = duty;
+
+    ledc_set_duty(timer_.speed_mode, pinConfig->channel, duty);
+    if (update_immediately) {
+        ledc_update_duty(timer_.speed_mode, pinConfig->channel);
+    }
+    return true;
 }
 
 uint32_t Esp32HardwarePwm::getDuty(uint8_t pin) {
@@ -293,7 +303,47 @@ uint32_t Esp32HardwarePwm::getDuty(uint8_t pin) {
         return 0;
     }
     auto pin_config = getPinConfig(pin);
+    if (!pin_config) {
+        return 0;
+    }
     return ledc_get_duty(timer_.speed_mode, pin_config->channel);
+}
+
+uint32_t Esp32HardwarePwm::getDutyChan(uint8_t channel) {
+    if (!initialized_) {
+        return 0;
+    }
+    //debug_i("Getting duty for channel %d", channel);
+    if (channel >= pins_.size()) {
+        return 0;
+    }
+    return ledc_get_duty(timer_.speed_mode, pins_.at(channel).channel);
+}
+
+bool Esp32HardwarePwm::setDutyChan(uint8_t channel, uint32_t duty, bool update_immediately) {
+    if (!initialized_||channel >= pins_.size()) {
+        return false;
+    }
+    
+    if (pins_.at(channel).currentDuty==duty) {
+        //debug_i("No change in duty for pin %d channel %d: %d", pins_.at(channel).gpioPin,pins_.at(channel).channel,duty);
+        return true; // no change
+    }
+
+    uint32_t max_duty = getMaxDuty();
+    if (duty > max_duty) {
+        debug_w("Duty %d exceeds maximum %d, clamping", duty, max_duty);
+        duty = max_duty;
+    }
+
+    debug_i("Setting duty for pin %d channel %d: %d", pins_.at(channel).gpioPin,pins_.at(channel).channel,duty);
+    pins_.at(channel).currentDuty = duty;
+    ledc_set_duty(timer_.speed_mode, pins_.at(channel).channel, duty);
+
+    if (update_immediately) {
+        ledc_update_duty(timer_.speed_mode, pins_.at(channel).channel);
+    }
+    return true;
 }
 
 bool Esp32HardwarePwm::setDutyPercent(uint8_t pin, float percentage, bool update_immediately) {
@@ -324,7 +374,11 @@ bool Esp32HardwarePwm::setPhaseShift(uint8_t pin, uint32_t phase_shift, bool upd
     }
     pin_config->hpoint = phase_shift;
 
-    return applyChange(pin, update_immediately);
+    ledc_set_duty_with_hpoint(timer_.speed_mode, pin_config->channel, pin_config->currentDuty, pin_config->hpoint);
+    if (update_immediately) {
+        ledc_update_duty(timer_.speed_mode, pin_config->channel);
+    }
+    return true;
 }
 
 bool Esp32HardwarePwm::setFrequency(uint32_t frequency) {
@@ -492,53 +546,6 @@ bool Esp32HardwarePwm::fadeToPercent(uint8_t pin, float target_percent, uint32_t
     
     uint32_t target_duty = static_cast<uint32_t>((target_percent / 100.0f) * getMaxDuty());
     return fadeToValue(pin, target_duty, fade_time_ms, wait_for_completion);
-}
-
-
-bool Esp32HardwarePwm::applyChange(uint8_t pin, bool update_immediately) {
-
-    esp_err_t result;
-
-    auto pinConfig = getPinConfig(pin);
-    if (!pinConfig) {
-        debug_e("Invalid pin: %d", pin);
-        return false;
-    }
-
-    debug_i("   applying duty %d and hpoint %d to pin %d on channel %d", pinConfig->currentDuty, pinConfig->hpoint, pin, pinConfig->channel);
-
-    // Set duty, with hpoint if phase shift is enabled
-    
-    if (phaseShift_.mode == PhaseShiftMode::OFF) {
-        debug_i("Setting duty for pin %d to %d", pin, pinConfig->currentDuty);
-        result = ledc_set_duty(
-            timer_.speed_mode,
-            pinConfig->channel,
-            pinConfig->currentDuty
-        );
-    } else {
-      result = ledc_set_duty_with_hpoint(
-            timer_.speed_mode,
-            pinConfig->channel,
-            pinConfig->currentDuty,
-            pinConfig->hpoint
-        );
-    }
-
-    if (result != ESP_OK) {
-        debug_e("Failed to set duty: %s", esp_err_to_name(result));
-        return false;
-    }
-
-    if (update_immediately) {
-        result = ledc_update_duty(timer_.speed_mode, pinConfig->channel);
-        if (result != ESP_OK) {
-            debug_e("Failed to update duty: %s", esp_err_to_name(result));
-            return false;
-        }
-    }
-
-    return true;
 }
 
 bool Esp32HardwarePwm::setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectrumConfig* config) {

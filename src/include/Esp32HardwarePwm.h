@@ -94,7 +94,7 @@ struct Esp32HwPwmTimerConfig {
 };
 
 struct Esp32HwPwmConfig {
-    uint8_t channelStart = 0;
+    ledc_channel_t channelStart = LEDC_CHANNEL_0;
     Esp32HwPwmTimerConfig timer = {};
     Esp32HwPwmPhaseShiftConfig phaseShift = {};
     Esp32HwPwmSpreadSpectrumConfig spreadSpectrum = {};
@@ -154,6 +154,10 @@ public:
      * @return Current duty cycle value
      */
     uint32_t getDuty(uint8_t pin) ;
+
+    uint32_t getDutyChan(uint8_t channel);
+
+    bool setDutyChan(uint8_t channel, uint32_t duty, bool update_immediately = true);
 
     /**
      * @brief Set duty cycle as percentage (0.0 to 100.0)
@@ -317,15 +321,19 @@ private:
     Esp32HwPwmPhaseShiftConfig phaseShift_;
     std::vector<HwPwmPinConfig> pins_;
 
-    int min_freq, max_freq, step_hz, interval_us;
+    bool initialized_=false;
+    bool fadeInstalled_=false;
+
+    ledc_channel_t channelStart_=LEDC_CHANNEL_0;
+
+    // Spread spectrum modulation parameters
+    int min_freq=0, max_freq=0, step_hz=0, interval_us=0;
     int current_freq=0;
     int direction=1;
 
     //std::vector<uint8_t> pins_;
     //size_t num_channels_ = 0;
     //Esp32HwPwmConfig config_;
-    bool initialized_;
-    bool fadeInstalled_;
     //uint8_t timer_num_;
 
 
@@ -361,14 +369,11 @@ private:
     };
 
     /**
-     * @brief Apply duty cycle change to hardware
-     * @param channel_info Channel information
-     * @param duty New duty cycle
-     * @param update_immediately Apply immediately
+     * @brief Start spread spectrum modulation
+     * @param frequency Center frequency in Hz
+     * @param config Spread spectrum configuration
      * @return true if successful, false otherwise
      */
-    bool applyChange(uint8_t pin,  bool update_immediately);
-
     bool setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectrumConfig* config);
 
     static void IRAM_ATTR timerIsr(void* arg);
