@@ -5,21 +5,91 @@ A comprehensive C++ wrapper for the ESP32 LEDC PWM functionality, designed for t
 ## Features
 
 - **Multiple PWM Instances**: Create multiple independent PWM instances with different configurations
-- **Automatic Resource Management**: Global resource manager prevents channel and timer conflicts
-- **Thread-Safe Operations**: Safe for use in multi-threaded applications
 - **Flexible Configuration**: Support for different frequencies, duty resolutions (1-20 bits), and speed modes
 - **Phase Shifting**: Built-in support for phase shifting to reduce EMI
-- **Hardware Fade**: Hardware-accelerated fade transitions
-- **High Performance**: Direct ESP-IDF LEDC API integration
-- **Memory Efficient**: RAII-based resource management
+- (todo) **Hardware Fade**: Hardware-accelerated fade transitions
 
 ## ESP32 LEDC Hardware Overview
 
-The ESP32 LEDC peripheral provides up to 16 PWM channels:
-- **Low Speed Mode**: 8 channels (always available)
-- **High Speed Mode**: 8 additional channels (ESP32 only)
-
-Each group has 4 timers that can be shared between channels. The wrapper automatically manages timer allocation and sharing when channels have compatible configurations.
+ * the ESP32 PWM Hardware is much more powerful than the ESP8266, allowing wider PWM timers (up to 20 bit)
+ * as well as much higher PWM frequencies (up to 40MHz for a 1 Bit wide PWM)
+ * 
+ * Overview:
+ * +------------------------------------------------------------------------------------------------+
+ * | LED_PWM                                                                                        |
+ * |  +-------------------------------------------+   +-------------------------------------------+ |
+ * |  | High_Speed_Channels¹                      |   | Low_Speed_Channels                        | |
+ * |  |                   +-----+     +--------+  |   |                   +-----+     +--------+  | |
+ * |  |                   |     | --> | h_ch 0 |  |   |                   |     | --> | l_ch 0 |  | |
+ * |  | +-----------+     |     |     +--------+  |   | +-----------+     |     |     +--------+  | |
+ * |  | | h_timer 0 | --> |     |                 |   | | l_timer 0 | --> |     |                 | |
+ * |  | +-----------+     |     |     +--------+  |   | +-----------+     |     |     +--------+  | |
+ * |  |                   |     | --> | h_ch 1 |  |   |                   |     | --> | l_ch 1 |  | |
+ * |  |                   |     |     +--------+  |   |                   |     |     +--------+  | |
+ * |  |                   |     |                 |   |                   |     |                 | |
+ * |  |                   |     |     +--------+  |   |                   |     |     +--------+  | |
+ * |  |                   |     | --> | h_ch 2 |  |   |                   |     | --> | l_ch 2 |  | |
+ * |  | +-----------+     |     |     +--------+  |   | +-----------+     |     |     +--------+  | |
+ * |  | | h_timer 1 | --> |     |                 |   | | l_timer 1 | --> |     |                 | |
+ * |  | +-----------+     |     |     +--------+  |   | +-----------+     |     |     +--------+  | |
+ * |  |                   |     | --> | h_ch 3 |  |   |                   |     | --> | l_ch 3 |  | |
+ * |  |                   |     |     +--------+  |   |                   |     |     +--------+  | |
+ * |  |                   | MUX |                 |   |                   | MUX |                 | |
+ * |  |                   |     |     +--------+  |   |                   |     |     +--------+  | |
+ * |  |                   |     | --> | h_ch 4 |  |   |                   |     | --> | l_ch 4 |  | |
+ * |  | +-----------+     |     |     +--------+  |   | +-----------+     |     |     +--------+  | |
+ * |  | | h_timer 2 | --> |     |                 |   | | l_timer 2 | --> |     |                 | |
+ * |  | +-----------+     |     |     +--------+  |   | +-----------+     |     |     +--------+  | |
+ * |  |                   |     | --> | h_ch 5 |  |   |                   |     | --> | l_ch 5 |  | |
+ * |  |                   |     |     +--------+  |   |                   |     |     +--------+  | |
+ * |  |                   |     |                 |   |                   |     |                 | |
+ * |  |                   |     |     +--------+  |   |                   |     |     +--------+  | |
+ * |  |                   |     | --> | h_ch 6 |  |   |                   |     | --> | l_ch 6²|  | |
+ * |  | +-----------+     |     |     +--------+  |   | +-----------+     |     |     +--------+  | |
+ * |  | | h_timer 3 | --> |     |                 |   | | l_timer 3 | --> |     |                 | |
+ * |  | +-----------+     |     |     +--------+  |   | +-----------+     |     |     +--------+  | |
+ * |  |                   |     | --> | h_ch 7 |  |   |                   |     | --> | l_ch 7²|  | |
+ * |  |                   |     |     +--------+  |   |                   |     |     +--------+  | |
+ * |  |                   +-----+                 |   |                   +-----+                 | |
+ * |  +-------------------------------------------+   +-------------------------------------------+ |
+ * +------------------------------------------------------------------------------------------------+
+ * ¹ High speed channels are only available when SOC_LEDC_SUPPORT_HS_MODE is defined as 1
+ * ² The ESP32C3 does only support six channels, so 6 and 7 are not available on that SoC
+ * 
+ * The nomenclature of timers in the high speed / low speed blocks is a bit misleading as the idf api 
+ * speaks of "speed mode", which, to me, implies that this would be a mode configurable in a specific timer
+ * while in reality, it does select a block of timers.
+ * 
+ * Maximum Timer width for PWM:
+ * ============================
+ * esp32   SOC_LEDC_TIMER_BIT_WIDE_NUM  (20)
+ * esp32c3 SOC_LEDC_TIMER_BIT_WIDE_NUM  (14)
+ * esp32s2 SOC_LEDC_TIMER_BIT_WIDE_NUM  (14)
+ * esp32s3 SOC_LEDC_TIMER_BIT_WIDE_NUM  (14)
+ * 
+ * Number of Channels:
+ * ===================
+ * esp32   SOC_LEDC_CHANNEL_NUM         (8)
+ * esp32c3 SOC_LEDC_CHANNEL_NUM         (6)
+ * esp32s2 SOC_LEDC_CHANNEL_NUM         (8)
+ * esp32s3 SOC_LEDC_CHANNEL_NUM 		(8)
+ *
+ * Some SoSs support a mode called HIGHSPEED_MODE which is essentially another full block of PWM hardware 
+ * that adds SOC_LEDC_CHANNEL_NUM channels. 
+ * Those Architectures have SOC_LEDC_SUPPORT_HS_MODE defined as 1.
+ * In esp-idf-4.3 that's currently only the esp32 SOC 
+ * 
+ * Supports highspeed mode:
+ * ========================
+ * esp32 SOC_LEDC_SUPPORT_HS_MODE	(1)
+ * 
+ * hardware technical reference: 
+ * =============================
+ * https://www.espressif.com/sites/default/files/documentation/esp32_technical_reference_manual_en.pdf#ledpwm
+ * 
+ * Overview of the whole ledc-system here: 
+ * https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/ledc.html
+ * 
 
 ## Quick Start
 
