@@ -1,7 +1,7 @@
 {
   "name": "Esp32HardwarePwm",
   "version": "1.0.0",
-  "description": "Comprehensive ESP32 LEDC PWM wrapper for Sming Framework with automatic resource management, phase shifting, and hardware fade support",
+  "description": "ESP32 LEDC PWM wrapper for Sming Framework with phase shifting, spread spectrum capability and hardware fade support",
   "keywords": [
     "ESP32",
     "PWM", 
