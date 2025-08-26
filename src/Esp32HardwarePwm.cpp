@@ -268,47 +268,6 @@ bool Esp32HardwarePwm::initialize() {
     return true;
 }
 
-bool Esp32HardwarePwm::setDuty(uint8_t pin, uint32_t duty, bool update_immediately) {
-    if (!initialized_) {
-        debug_e("PWM not initialized");
-        return false;
-    }
-    
-    uint32_t max_duty = getMaxDuty();
-    if (duty > max_duty) {
-        debug_w("Duty %d exceeds maximum %d, clamping", duty, max_duty);
-        duty = max_duty;
-    }
-
-    // debug_i("Setting duty for pin %d: %d", pin, duty);
-
-    getPinConfig(pin)->currentDuty = duty;  
-
-    auto pinConfig = getPinConfig(pin);
-    if (!pinConfig) {
-        return false;
-    }
-    pinConfig->currentDuty = duty;
-
-    ledc_set_duty(timer_.speed_mode, pinConfig->channel, duty);
-    if (update_immediately) {
-        ledc_update_duty(timer_.speed_mode, pinConfig->channel);
-    }
-    return true;
-}
-
-uint32_t Esp32HardwarePwm::getDuty(uint8_t pin) {
-    
-    if (!initialized_) {
-        return 0;
-    }
-    auto pin_config = getPinConfig(pin);
-    if (!pin_config) {
-        return 0;
-    }
-    return ledc_get_duty(timer_.speed_mode, pin_config->channel);
-}
-
 uint32_t Esp32HardwarePwm::getDutyChan(uint8_t channel) {
     if (!initialized_) {
         return 0;
@@ -344,39 +303,18 @@ bool Esp32HardwarePwm::setDutyChan(uint8_t channel, uint32_t duty, bool update_i
         ledc_update_duty(timer_.speed_mode, pins_.at(channel).channel);
     }
     return true;
-}Esp32HardwarePwm/pull/2
-
-bool Esp32HardwarePwm::setDutyPercent(uint8_t pin, float percentage, bool update_immediately) {
-    if (percentage < 0.0f) percentage = 0.0f;
-    if (percentage > 100.0f) percentage = 100.0f;
-    
-    uint32_t duty = static_cast<uint32_t>((percentage / 100.0f) * getMaxDuty());
-    return setDuty(pin, duty, update_immediately);
 }
 
-float Esp32HardwarePwm::getDutyPercent(uint8_t pin) {
-    uint32_t duty = getDuty(pin);
-    uint32_t max_duty = getMaxDuty();
-    
-    if (max_duty == 0) return 0.0f;
-    
-    return (static_cast<float>(duty) / max_duty) * 100.0f;
-}
-
-bool Esp32HardwarePwm::setPhaseShift(uint8_t pin, uint32_t phase_shift, bool update_immediately) {
+bool Esp32HardwarePwm::setPhaseShiftChan(uint8_t channel, uint32_t phase_shift, bool update_immediately) {
     if (!initialized_) {
         return false;
     }
 
-    auto pin_config = getPinConfig(pin);
-    if (!pin_config) {
-        return false;
-    }
-    pin_config->hpoint = phase_shift;
+    pins_.at(channel).hpoint = phase_shift;
 
-    ledc_set_duty_with_hpoint(timer_.speed_mode, pin_config->channel, pin_config->currentDuty, pin_config->hpoint);
+    ledc_set_duty_with_hpoint(timer_.speed_mode, (ledc_channel_t) channel, pins_.at(channel).currentDuty, pins_.at(channel).hpoint);
     if (update_immediately) {
-        ledc_update_duty(timer_.speed_mode, pin_config->channel);
+        ledc_update_duty(timer_.speed_mode, (ledc_channel_t) channel);
     }
     return true;
 }
@@ -595,9 +533,7 @@ void IRAM_ATTR Esp32HardwarePwm::timerIsr(void* arg) {
 }
 
 void Esp32HardwarePwm::handleSpreadSpectrum() {
-    current_freq += direction * step_hz;
-
-    if (current_freq >= max_freq) direction = -1;
-    if (current_freq <= min_freq) direction = +1;
-    ledc_set_freq(timer_.speed_mode, timer_.timer_num, current_freq);
+    int width = (spreadSpectrum_.WidthPercent * timer_.frequency) / 100;
+    int r = esp_random() % (2 * width + 1) - width; // r in [-width, +width]
+    ledc_set_freq(timer_.speed_mode, timer_.timer_num, timer_.frequency + r);
 }

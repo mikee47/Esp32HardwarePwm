@@ -82,7 +82,6 @@ struct Esp32HwPwmSpreadSpectrumConfig {
     SpreadSpectrumMode mode = SpreadSpectrumMode::OFF;
     uint8_t WidthPercent = 0;
     uint16_t Subsampling = 0;
-    uint8_t StepsizeHz = 0;
 };
 
 struct Esp32HwPwmTimerConfig {
@@ -146,14 +145,18 @@ public:
      * @param update_immediately Apply changes immediately (default: true)
      * @return true if successful, false otherwise
      */
-    bool setDuty(uint8_t pin, uint32_t duty, bool update_immediately = true);
+    bool setDuty(uint8_t pin, uint32_t duty, bool update_immediately = true){
+        return setDutyChan(getPinConfig(pin)->channel, duty, update_immediately);
+    };
 
     /**
      * @brief Get PWM duty cycle for a specific pin
      * @param pin GPIO pin number
      * @return Current duty cycle value
      */
-    uint32_t getDuty(uint8_t pin) ;
+    uint32_t getDuty(uint8_t pin){
+        return getDutyChan(getPinConfig(pin)->channel);
+    } ;
 
     uint32_t getDutyChan(uint8_t channel);
 
@@ -161,19 +164,33 @@ public:
 
     /**
      * @brief Set duty cycle as percentage (0.0 to 100.0)
-     * @param pin GPIO pin number
+     * @param channel channel index 
      * @param percentage Duty cycle percentage
      * @param update_immediately Apply changes immediately (default: true)
      * @return true if successful, false otherwise
      */
-    bool setDutyPercent(uint8_t pin, float percentage, bool update_immediately = true);
+    bool setDutyChanPercent(uint8_t channel, float percentage, bool update_immediately = true){
+        if (percentage < 0.0f) percentage = 0.0f;
+        if (percentage > 100.0f) percentage = 100.0f;
+
+        uint32_t duty = static_cast<uint32_t>(percentage * getMaxDuty() / 100.0f);
+        return setDutyChan(channel, duty, update_immediately);
+    };
 
     /**
      * @brief Get duty cycle as percentage
-     * @param pin GPIO pin number
+     * @param channel channel index 
      * @return Duty cycle percentage (0.0 to 100.0)
      */
-    float getDutyPercent(uint8_t pin) ;
+    float getDutyChanPercent(uint8_t channel) {
+        uint32_t duty = getDutyChan(channel);
+        uint32_t max_duty = getMaxDuty();
+        
+        if (max_duty == 0) return 0.0f;
+        
+        return (static_cast<float>(duty) / max_duty) * 100.0f;
+    };
+
 
     /**
      * @brief Arduino-style analogWrite function
@@ -190,7 +207,7 @@ public:
      * @param phase_shift Phase shift value in points pwm resolution
      * @return true if successful, false otherwise
      */
-    bool setPhaseShift(uint8_t pin, uint32_t phase_shift, bool update_immediately=true) ;
+    bool setPhaseShiftChan(uint8_t pin, uint32_t phase_shift, bool update_immediately=true) ;
 
     /**
      * @brief Change PWM frequency for all channels
@@ -326,11 +343,6 @@ private:
 
     ledc_channel_t channelStart_=LEDC_CHANNEL_0;
 
-    // Spread spectrum modulation parameters
-    int min_freq=0, max_freq=0, step_hz=0, interval_us=0;
-    int current_freq=0;
-    int direction=1;
-
     //std::vector<uint8_t> pins_;
     //size_t num_channels_ = 0;
     //Esp32HwPwmConfig config_;
@@ -373,7 +385,10 @@ private:
      * @param frequency Center frequency in Hz
      * @param config Spread spectrum configuration
      * @return true if successful, false otherwise
-     */
+     */current_freq += direction * step_hz;
+
+    if (current_freq >= max_freq) direction = -1;
+    if (current_freq <= min_freq) direction = +1;
     bool setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectrumConfig* config);
 
     static void IRAM_ATTR timerIsr(void* arg);
