@@ -30,20 +30,20 @@ Each group has 4 timers that can be shared between channels. The wrapper automat
 #include "Esp32HardwarePwm.h"
 
 // Define pins for PWM output
-uint8_t pwm_pins[] = {2, 4, 5, 18};
+std::vector<uint8_t> pwm_pins = {2, 4, 5, 18};
 
 void init() {
     Serial.begin(SERIAL_BAUD_RATE);
-    
-    // Create PWM instance with default settings (1kHz, 10-bit resolution)
-    auto pwm = std::make_unique<Esp32HardwarePwm>(pwm_pins, 4);
-    
-    if (pwm->isInitialized()) {
+
+    // Create PWM instance with default settings
+    Esp32HardwarePwm pwm(pwm_pins);
+
+    if (pwm.isInitialized()) {
         // Set different duty cycles
-        pwm->setDutyPercent(2, 25.0f);   // 25% duty cycle on pin 2
-        pwm->setDuty(4, 512);            // 50% duty cycle on pin 4 (512/1024)
-        pwm->analogWrite(5, 768);        // 75% duty cycle on pin 5
-        
+        pwm.setDutyChanPercent(0, 25.0f);   // 25% duty cycle on channel 0
+        pwm.setDutyChan(1, 512);            // Duty cycle on channel 1
+        pwm.analogWrite(2, 768);            // Duty cycle on channel 2
+
         Serial.println("PWM initialized successfully");
     } else {
         Serial.println("PWM initialization failed");
@@ -57,99 +57,128 @@ void init() {
 #include "Esp32HardwarePwm.h"
 
 void advancedPwmExample() {
-    uint8_t led_pins[] = {12, 13, 14};
-    
-    // Configure for high-frequency PWM with phase shifting
-    Esp32PwmConfig config;
+    std::vector<uint8_t> led_pins = {12, 13, 14};
+
+    Esp32HwPwmConfig config;
     config.frequency = 20000;                    // 20kHz
-    config.resolution = LEDC_TIMER_12_BIT;       // 12-bit resolution (0-4095)
+    config.resolution = LEDC_TIMER_12_BIT;       // 12-bit resolution
     config.speed_mode = LEDC_LOW_SPEED_MODE;     // Low speed mode
-    config.use_phase_shift = true;               // Enable phase shifting for EMI reduction
-    config.enable_fade = true;                   // Enable hardware fade
-    
-    auto pwm = std::make_unique<Esp32HardwarePwm>(led_pins, 3, config);
-    
-    if (pwm->isInitialized()) {
-        // Enable fade functionality
-        pwm->enableFade();
-        
-        // Start smooth fade transitions
-        pwm->fadeToPercent(12, 100.0f, 2000);   // Fade to 100% over 2 seconds
-        pwm->fadeToPercent(13, 50.0f, 1500);    // Fade to 50% over 1.5 seconds
-        pwm->fadeToValue(14, 2048, 1000, true); // Fade to 50% over 1 second, wait for completion
-    }
-}
-```
+    config.phaseShift.mode = PhaseShiftMode::AUTO; // Enable phase shifting
+    config.spreadSpectrum.mode = SpreadSpectrumMode::OFF; // No spread spectrum
 
-### Multiple Independent PWM Instances
+    Esp32HardwarePwm pwm(led_pins, config);
 
-```cpp
-void multipleInstancesExample() {
-    // RGB LED with high frequency
-    uint8_t rgb_pins[] = {16, 17, 18};
-    Esp32PwmConfig rgb_config;
-    rgb_config.frequency = 10000;
-    rgb_config.resolution = LEDC_TIMER_8_BIT;
-    rgb_config.use_phase_shift = true;
-    
-    auto rgb_pwm = std::make_unique<Esp32HardwarePwm>(rgb_pins, 3, rgb_config);
-    
-    // Servo control with standard frequency
-    uint8_t servo_pins[] = {19, 21};
-    Esp32PwmConfig servo_config;
-    servo_config.frequency = 50;  // 50Hz for servo control
-    servo_config.resolution = LEDC_TIMER_16_BIT;
-    
-    auto servo_pwm = std::make_unique<Esp32HardwarePwm>(servo_pins, 2, servo_config);
-    
-    // Both instances work independently
-    if (rgb_pwm->isInitialized() && servo_pwm->isInitialized()) {
-        // Control RGB LED
-        rgb_pwm->setDutyPercent(16, 100.0f);  // Red
-        rgb_pwm->setDutyPercent(17, 0.0f);    // Green
-        rgb_pwm->setDutyPercent(18, 50.0f);   // Blue
-        
-        // Control servos (assuming 1.5ms = center position)
-        uint32_t center_position = (1.5f / 20.0f) * rgb_pwm->getMaxDuty(); // 1.5ms out of 20ms
-        servo_pwm->setDuty(19, center_position);
-        servo_pwm->setDuty(21, center_position);
+    if (pwm.isInitialized()) {
+        pwm.enableFade();
+
+        pwm.fadeToPercent(0, 100.0f, 2000);   // Fade to 100% over 2 seconds
+        pwm.fadeToPercent(1, 50.0f, 1500);    // Fade to 50% over 1.5 seconds
+        pwm.fadeToValue(2, 2048, 1000, true); // Fade to value over 1 second, wait for completion
     }
 }
 ```
 
 ## API Reference
 
-### Configuration Structure
+### Configuration Structures
 
 ```cpp
-struct Esp32PwmConfig {
-    uint32_t frequency = 1000;                          // PWM frequency in Hz
-    ledc_timer_bit_t resolution = LEDC_TIMER_10_BIT;    // Duty resolution (1-20 bits)
-    ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;       // Speed mode
-    ledc_clk_cfg_t clock_source = LEDC_AUTO_CLK;       // Clock source
-    bool use_phase_shift = false;                       // Enable phase shifting
-    bool enable_fade = false;                          // Enable hardware fade
+struct Esp32HwPwmTimerConfig {
+    ledc_mode_t speed_mode;
+    ledc_timer_bit_t resolution;
+    ledc_timer_t timer_num;
+    uint32_t frequency;
+    ledc_clk_cfg_t clk_cfg;
+};
+
+struct Esp32HwPwmSpreadSpectrumConfig {
+    SpreadSpectrumMode mode;
+    int WidthPercent;
+    int Subsampling;
+    int StepsizeHz;
+};
+
+struct Esp32HwPwmPhaseShiftConfig {
+    PhaseShiftMode mode;
+    std::vector<uint32_t> manual_hpoints;
 };
 ```
 
-### Main Class Methods
+### Main Class: Esp32HardwarePwm
 
-#### Constructor
+#### Constructors
+At it's most basic, the Esp32 pwm can be instantiated using just the pins array. In this case, it will 
+behave much like the original HardwarePWM implementation in Sming, with the minor difference that inctead
+of a C style array, the constructor teakes a std::vector (todo: should there be an overload with a C array?)
+the `Esp32HwPwmConfig` structure comes with additional settings to configure
+phase shift, the timer and spread spectrum settings.
+*Caution:* this library does not provide internal resource allocation. If you don't provide a `Esp32HwPwmConfig` structure,
+all resource allocations will be as per default, specifically, for the timer, those are
+- `timer.speed_mode` = `LEDC_LOW_SPEED_MODE` - available on all Esp32 variants 
+- `timer.timer_num`  = `LEDC_TIMER_0` - the first timer in the system
+- `timer.resolution` = `LEDC_TIMER_10_BIT` - a 10 Bit timer (max duty=1023)
+- `timer.frequency`  = 1000 - 1kHz
+- `timer.clk_cfg`    = `LEDC_AUTO_CLK`
+those are all timer specific settings and are generally a good base setting. If you want more than one `Esp32HardwarePwm` instance in 
+your code, you *can* use the same timer settings - meaning both instances will share the same timer - no problem there, but they will
+share the same settings and if you change the timer settings in one (such as the frequency) that will also change for the other.
+If you are using multiple instances, you will at least have to set the `channelStart` value on the 2nd instance, since otherwise, it 
+will be set to LEDC_CHANNEL_0, overwriting the channel config in your first instance. 
+On an embedded platform, it seems reasonable to leave full control over the hardware allocation to the developer rather than automatically
+allocate timers and channels from a pool, but this may be a pitfal.
+So: if you use more than one pwm object, make sure that you instantiate the 2nd one with a minimal `Esp23HwPwmConfig.channelStart` set to
+the first free channel on your system.
+Also be aware that the `timer.speed_mode` devides that channel groups in two and one `Esp32HardwarePwm` instance cannot overlap between the two.
+If you have one instance using five channels and you want to create a 2nd instance with four channels on the same `timer.speed_mode` you will get a runtime error, since the maximum amount of channels is 8 per speed mode (depending on the SoC, only the Esp32 has high speed timers, and the Esp32c3, as an example, has only six channels and a low speed timer).
+As said: channel allocation is left to the developer!
+
+##### Phase Shift
+when building a high power driver for LEDs or a motor, it might be desireable to not have all channels switch on at the exact same time. Phase shifting helps by allowing the developer to set a per-channel delay within the pwm period.
+The easiest way is to set `Esp32HwPwmConfig.phaseShift.mode = PhaseShiftMode::AUTO` which will make sure that the phases are equally staggered across the pwm period.
+You can also set `Esp32HwPwmConfig.phaseShift.mode = PhaseShiftMode::MANUAL` in wich case you have to provide a `std::vector` of size pins of int values between 0 and pwm period as `Esp32HwPwmConfig.phaseShift.manual_hpoints` - those will then be used as the hpoints for your signals. This way, you could, as an example, stagger them by 10% of your perio, starting channel 0 at t=0, channel 1 at t=10%, channel 2 at 20% etc. You will have to calculate those hpoint values manually for any given pwm frequency / period.
+It is generally suggested to leave phaseShift `OFF` in low current uses and `AUTO` where the switchim impact on the power lines is significant or EMI is a consideration.
+
+##### Spread Spectrum
+
+
 ```cpp
-Esp32HardwarePwm(const uint8_t* pins, uint8_t pin_count);
-Esp32HardwarePwm(const uint8_t* pins, uint8_t pin_count, const Esp32PwmConfig& config);
+Esp32HardwarePwm(std::vector<uint8_t>& pins);
+Esp32HardwarePwm(std::vector<uint8_t>& pins, const Esp32HwPwmConfig& config);
+```
+
+#### Destructor
+```cpp
+virtual ~Esp32HardwarePwm();
 ```
 
 #### Duty Cycle Control
+The library includes two different ways to access a pwm channel - by `pin` or `channel`.
+The per pin interface seems a bit more straight forward for makers who come from the hardware side
+while the per channel interface is the native interface for the ledc_ api. 
+
+
+#####per channel interface
 ```cpp
-bool setDuty(uint8_t pin, uint32_t duty, bool update_immediately = true);
-uint32_t getDuty(uint8_t pin) const;
-bool setDutyPercent(uint8_t pin, float percentage, bool update_immediately = true);
-float getDutyPercent(uint8_t pin) const;
-bool analogWrite(uint8_t pin, uint32_t duty);  // Arduino-style interface
+uint32_t getDutyChan(uint8_t channel);
+bool setDutyChan(uint8_t channel, uint32_t duty, bool update_immediately = true);
+bool setDutyChanPercent(uint8_t channel, float percentage, bool update_immediately = true);
+float getDutyChanPercent(uint8_t channel);
 ```
 
-#### Frequency Control
+#####per pin interface
+```cpp
+bool setDuty(uint8_t pin, uint32_t duty, bool update_immediately = true);
+uint32_t getDuty(uint8_t pin);
+bool analogWrite(uint8_t pin, uint32_t duty);
+```
+
+#### Phase Shift Control
+```cpp
+bool setPhaseShiftChan(uint8_t pin, uint32_t phase_shift, bool update_immediately = true);
+```
+
+#### Frequency and Period Control
+These calls set the pwm frequency. Be aware that, if spread spectrum is enabled, this is the center frequency that the spectrum is spread around
 ```cpp
 bool setFrequency(uint32_t frequency);
 uint32_t getFrequency() const;
@@ -157,180 +186,35 @@ bool setPeriod(uint32_t period_us);
 uint32_t getPeriod() const;
 ```
 
+#### Information
+This interface provides information about the current Esp32HardwarePwm instance
+```cpp
+uint32_t getMaxDuty() const;
+uint8_t getResolution() const;
+uint8_t getPinCount() const;
+bool isInitialized() const;
+```
+
 #### Control Functions
 ```cpp
+void update();
 bool start(uint8_t pin);
 bool stop(uint8_t pin, uint8_t idle_level = 0);
 void startAll();
 void stopAll(uint8_t idle_level = 0);
-void update();  // Apply pending changes
-```
-
-#### Information
-```cpp
-uint32_t getMaxDuty() const;
-uint8_t getResolution() const;
-uint8_t getChannelCount() const;
-bool isInitialized() const;
-const PwmChannelInfo* getChannelInfo(uint8_t pin) const;
 ```
 
 #### Hardware Fade
 ```cpp
 bool enableFade();
 void disableFade();
-bool fadeToValue(uint8_t pin, uint32_t target_duty, uint32_t fade_time_ms, 
-                 bool wait_for_completion = false);
-bool fadeToPercent(uint8_t pin, float target_percent, uint32_t fade_time_ms,
-                   bool wait_for_completion = false);
+bool fadeToValue(uint8_t pin, uint32_t target_duty, uint32_t fade_time_ms, bool wait_for_completion = false);
+bool fadeToPercent(uint8_t pin, float target_percent, uint32_t fade_time_ms, bool wait_for_completion = false);
 ```
-
-## Resource Management
-
-The library includes a global resource manager (`Esp32PwmResourceManager`) that:
-
-- Tracks allocation of all LEDC channels and timers
-- Prevents resource conflicts between multiple PWM instances
-- Automatically shares timers between channels with compatible configurations
-- Provides thread-safe resource allocation and deallocation
-
-### Available Resources by SoC
-
-| SoC     | Low Speed Channels | High Speed Channels | Timers per Mode | Max Resolution |
-|---------|-------------------|-------------------|----------------|---------------|
-| ESP32   | 8                 | 8                 | 4              | 20 bit        |
-| ESP32-C3| 6                 | 0                 | 4              | 14 bit        |
-| ESP32-S2| 8                 | 0                 | 4              | 14 bit        |
-| ESP32-S3| 8                 | 0                 | 4              | 14 bit        |
-
-## Performance Considerations
-
-### Frequency vs Resolution Trade-off
-
-Higher frequencies require lower duty resolution:
-- 40 MHz max frequency with 1-bit resolution
-- ~1 kHz typical frequency with 20-bit resolution
-- The library automatically validates frequency/resolution combinations
-
-### Timer Sharing
-
-Channels using the same timer configuration (frequency, resolution, clock source) automatically share timers, maximizing resource efficiency.
-
-### Phase Shifting
-
-When enabled, phase shifting distributes the rising edges of PWM signals evenly across the period, reducing:
-- Peak current draw
-- Electromagnetic interference (EMI)
-- Power supply noise
-
-## Thread Safety
-
-All public methods are thread-safe using internal mutexes. The resource manager also uses locks to prevent race conditions during resource allocation.
-
-## Error Handling
-
-The library provides comprehensive error handling:
-- Initialization validates pin counts and resource availability
-- Duty cycle values are automatically clamped to valid ranges
-- ESP-IDF error codes are logged with descriptive messages
-- Methods return boolean success indicators where appropriate
-
-## Migration from ESP8266
-
-The API maintains compatibility with ESP8266 PWM libraries while offering ESP32-specific features:
-
-```cpp
-// ESP8266 style (still works)
-pwm.analogWrite(pin, duty);
-
-// ESP32 enhanced features
-pwm.setDutyPercent(pin, 75.0f);
-pwm.fadeToPercent(pin, 25.0f, 2000);
-```
-
-## Examples
-
-The library includes comprehensive examples demonstrating various use cases:
-
-### Basic Examples
-- **`basic_pwm_example.cpp`** - Simple PWM control with LED dimming
-- **`advanced_pwm_demo.cpp`** - Multiple instances with different configurations
-- **`test_suite.cpp`** - Comprehensive testing and validation
-
-### Application Examples
-- **`servo_control_example.cpp`** - Servo motor control with smooth positioning
-  - Pan/tilt servo control
-  - Angle-to-pulse-width conversion
-  - Smooth motion with acceleration
-  - Serial command interface
-
-- **`rgb_led_effects_example.cpp`** - RGB LED effects and color mixing
-  - HSV to RGB color space conversion
-  - Multiple effect patterns (rainbow, breathing, fire, ocean)
-  - Smooth color transitions
-  - Interactive control interface
-
-- **`motor_control_example.cpp`** - DC motor speed control
-  - H-bridge motor driver support
-  - Acceleration and deceleration profiles
-  - Direction control and emergency stop
-  - Multiple motor coordination
-
-- **`integration_example.cpp`** - Complete IoT application
-  - Multiple PWM subsystems (lighting, servos, fans, buzzer)
-  - Web interface for remote control
-  - MQTT integration for IoT connectivity
-  - JSON configuration and status reporting
-  - Temperature-based automatic fan control
-
-### Building Examples
-
-Each example can be built as a standalone Sming application:
-
-```bash
-# Navigate to your Sming application directory
-cd examples/servo_control
-make flash  # Build and flash the servo control example
-
-# For advanced examples that require network connectivity
-cd examples/integration
-# Edit the source to configure WiFi credentials
-make flash
-```
-
-## Performance Considerations
-
-### Resource Usage
-- Each PWM instance uses approximately 200-400 bytes of RAM
-- Resource manager adds ~100 bytes overhead
-- Channel allocation is O(1) operation
-- Timer sharing reduces overall resource usage
-
-### Timing Accuracy
-- Hardware PWM provides microsecond precision
-- Frequency range: 1 Hz to 40 MHz (depending on resolution)
-- Phase shift accuracy: ±1 PWM clock cycle
-- Hardware fade provides smooth transitions without CPU intervention
-
-### Best Practices
-1. **Initialize once**: Create PWM instances during setup, not in loops
-2. **Batch updates**: Use `update()` to apply multiple changes simultaneously
-3. **Share timers**: Use compatible frequencies to allow timer sharing
-4. **Use appropriate resolution**: Higher resolution reduces max frequency
-5. **Enable phase shift**: Reduces EMI and power supply noise
 
 ## License
 
 This library is provided under the LGPL v3 license as part of the Sming Framework Project.
-
-## Contributing
-
-Contributions are welcome! Please ensure:
-- Code follows the existing style
-- New features include appropriate documentation
-- Thread safety is maintained
-- Resource management is properly handled
-- Include appropriate examples for new features
 
 ## References
 
