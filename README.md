@@ -95,7 +95,6 @@ struct Esp32HwPwmSpreadSpectrumConfig {
     SpreadSpectrumMode mode;
     int WidthPercent;
     int Subsampling;
-    int StepsizeHz;
 };
 
 struct Esp32HwPwmPhaseShiftConfig {
