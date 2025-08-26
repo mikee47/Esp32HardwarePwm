@@ -119,15 +119,20 @@ all resource allocations will be as per default, specifically, for the timer, th
 - `timer.resolution` = `LEDC_TIMER_10_BIT` - a 10 Bit timer (max duty=1023)
 - `timer.frequency`  = 1000 - 1kHz
 - `timer.clk_cfg`    = `LEDC_AUTO_CLK`
+
 those are all timer specific settings and are generally a good base setting. If you want more than one `Esp32HardwarePwm` instance in 
 your code, you *can* use the same timer settings - meaning both instances will share the same timer - no problem there, but they will
 share the same settings and if you change the timer settings in one (such as the frequency) that will also change for the other.
+
 If you are using multiple instances, you will at least have to set the `channelStart` value on the 2nd instance, since otherwise, it 
-will be set to LEDC_CHANNEL_0, overwriting the channel config in your first instance. 
+will be set to `LEDC_CHANNEL_0`, overwriting the channel config in your first instance. 
+
 On an embedded platform, it seems reasonable to leave full control over the hardware allocation to the developer rather than automatically
-allocate timers and channels from a pool, but this may be a pitfal.
+allocate timers and channels from a pool, but this may be a pitfall
+.
 So: if you use more than one pwm object, make sure that you instantiate the 2nd one with a minimal `Esp23HwPwmConfig.channelStart` set to
 the first free channel on your system.
+
 Also be aware that the `timer.speed_mode` devides that channel groups in two and one `Esp32HardwarePwm` instance cannot overlap between the two.
 If you have one instance using five channels and you want to create a 2nd instance with four channels on the same `timer.speed_mode` you will get a runtime error, since the maximum amount of channels is 8 per speed mode (depending on the SoC, only the Esp32 has high speed timers, and the Esp32c3, as an example, has only six channels and a low speed timer).
 As said: channel allocation is left to the developer!
@@ -135,7 +140,9 @@ As said: channel allocation is left to the developer!
 ##### Phase Shift
 when building a high power driver for LEDs or a motor, it might be desireable to not have all channels switch on at the exact same time. Phase shifting helps by allowing the developer to set a per-channel delay within the pwm period.
 The easiest way is to set `Esp32HwPwmConfig.phaseShift.mode = PhaseShiftMode::AUTO` which will make sure that the phases are equally staggered across the pwm period.
+
 You can also set `Esp32HwPwmConfig.phaseShift.mode = PhaseShiftMode::MANUAL` in wich case you have to provide a `std::vector` of size pins of int values between 0 and pwm period as `Esp32HwPwmConfig.phaseShift.manual_hpoints` - those will then be used as the hpoints for your signals. This way, you could, as an example, stagger them by 10% of your perio, starting channel 0 at t=0, channel 1 at t=10%, channel 2 at 20% etc. You will have to calculate those hpoint values manually for any given pwm frequency / period.
+
 It is generally suggested to leave phaseShift `OFF` in low current uses and `AUTO` where the switchim impact on the power lines is significant or EMI is a consideration.
 
 ##### Spread Spectrum
