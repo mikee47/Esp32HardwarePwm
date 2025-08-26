@@ -10,7 +10,7 @@ A comprehensive C++ wrapper for the ESP32 LEDC PWM functionality, designed for t
 - (todo) **Hardware Fade**: Hardware-accelerated fade transitions
 
 ## ESP32 LEDC Hardware Overview
-
+```
  * the ESP32 PWM Hardware is much more powerful than the ESP8266, allowing wider PWM timers (up to 20 bit)
  * as well as much higher PWM frequencies (up to 40MHz for a 1 Bit wide PWM)
  * 
@@ -90,7 +90,7 @@ A comprehensive C++ wrapper for the ESP32 LEDC PWM functionality, designed for t
  * Overview of the whole ledc-system here: 
  * https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/ledc.html
  * 
-
+```
 ## Quick Start
 
 ### Basic Usage
