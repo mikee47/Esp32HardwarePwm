@@ -169,11 +169,10 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Esp32HwPwmC
         timer_.frequency,
         timer_.speed_mode,
         timer_.clk_cfg);
-    debug_i("  SpreadSpectrum: mode=%d, WidthPercent=%d, Subsampling=%d, StepsizePercent=%d",
+    debug_i("  SpreadSpectrum: mode=%d, WidthPercent=%d, Subsampling=%d",
         spreadSpectrum_.mode,
         spreadSpectrum_.WidthPercent,
-        spreadSpectrum_.Subsampling,
-        spreadSpectrum_.StepsizeHz);
+        spreadSpectrum_.Subsampling);
     debug_i("  PhaseShiftMode: %d", static_cast<int>(phaseShift_.mode));
     debug_i("  Channel start: %d", config.channelStart);
     debug_i("  Pins : %i", pins.size());
@@ -491,23 +490,7 @@ bool Esp32HardwarePwm::setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectr
     if (config) {
         spreadSpectrum_ = *config;
     }
-
-    // Pre-calculate values
-    min_freq = frequency - (frequency * spreadSpectrum_.WidthPercent / 100);
-    max_freq = frequency + (frequency * spreadSpectrum_.WidthPercent / 100);
-    step_hz = spreadSpectrum_.StepsizeHz;
-    interval_us = 1000000 *  spreadSpectrum_.Subsampling/frequency;
-
-    debug_i("Spread spectrum configuration: %d Hz, %d%%, %d Hz",
-             frequency, spreadSpectrum_.WidthPercent, spreadSpectrum_.StepsizeHz);
-    debug_i("subsampling: %d, frequency: %d",
-             spreadSpectrum_.Subsampling, frequency);
-    debug_i("spread spectrum parameters: min_freq=%d, max_freq=%d, step_hz=%d, interval_µs=%d",
-             min_freq, max_freq, step_hz, interval_us);
-
-    current_freq = timer_.frequency;
-    direction = 1;
-
+    int interval_us = 1000000 * spreadSpectrum_.Subsampling / frequency;
     esp_timer_create_args_t timer_args = {
         .callback = &Esp32HardwarePwm::timerIsr,
         .arg = this,

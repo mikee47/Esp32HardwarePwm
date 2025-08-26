@@ -385,10 +385,7 @@ private:
      * @param frequency Center frequency in Hz
      * @param config Spread spectrum configuration
      * @return true if successful, false otherwise
-     */current_freq += direction * step_hz;
-
-    if (current_freq >= max_freq) direction = -1;
-    if (current_freq <= min_freq) direction = +1;
+     **/
     bool setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectrumConfig* config);
 
     static void IRAM_ATTR timerIsr(void* arg);
