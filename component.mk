@@ -3,7 +3,7 @@
 COMPONENT_SRCDIRS := src
 COMPONENT_INCDIRS := src/include
 
-# ESP32 specific component - currently keeps esp8266 from building - 
+# ESP32 specific component - currently keeps esp8266 from building -
 # COMPONENT_SOC := esp32*
 
 # Required for C++ features
