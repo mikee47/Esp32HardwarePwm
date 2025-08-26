@@ -533,9 +533,7 @@ void IRAM_ATTR Esp32HardwarePwm::timerIsr(void* arg) {
 }
 
 void Esp32HardwarePwm::handleSpreadSpectrum() {
-    current_freq += direction * step_hz;
-
-    if (current_freq >= max_freq) direction = -1;
-    if (current_freq <= min_freq) direction = +1;
-    ledc_set_freq(timer_.speed_mode, timer_.timer_num, current_freq);
+    int width = (spreadSpectrum_.WidthPercent * timer_.frequency) / 100;
+    int r = esp_random() % (2 * width + 1) - width; // r in [-width, +width]
+    ledc_set_freq(timer_.speed_mode, timer_.timer_num, timer_.frequency + r);
 }

@@ -82,7 +82,6 @@ struct Esp32HwPwmSpreadSpectrumConfig {
     SpreadSpectrumMode mode = SpreadSpectrumMode::OFF;
     uint8_t WidthPercent = 0;
     uint16_t Subsampling = 0;
-    uint8_t StepsizeHz = 0;
 };
 
 struct Esp32HwPwmTimerConfig {
@@ -344,11 +343,6 @@ private:
 
     ledc_channel_t channelStart_=LEDC_CHANNEL_0;
 
-    // Spread spectrum modulation parameters
-    int min_freq=0, max_freq=0, step_hz=0, interval_us=0;
-    int current_freq=0;
-    int direction=1;
-
     //std::vector<uint8_t> pins_;
     //size_t num_channels_ = 0;
     //Esp32HwPwmConfig config_;
@@ -391,7 +385,10 @@ private:
      * @param frequency Center frequency in Hz
      * @param config Spread spectrum configuration
      * @return true if successful, false otherwise
-     */
+     */current_freq += direction * step_hz;
+
+    if (current_freq >= max_freq) direction = -1;
+    if (current_freq <= min_freq) direction = +1;
     bool setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectrumConfig* config);
 
     static void IRAM_ATTR timerIsr(void* arg);
