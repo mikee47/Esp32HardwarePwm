@@ -24,7 +24,6 @@
  * Reference: https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/ledc.html
  * 
  * Key Features:
- * - Automatic resource management of LEDC channels and timers
  * - Support for multiple PWM instances with different configurations
  * - Thread-safe operations
  * - Hardware fade support
@@ -102,10 +101,7 @@ typedef struct {
 //=============================================================================
 
 Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins)
-    : initialized_(false), fadeInstalled_(false) {
-    Esp32HwPwmConfig default_config;
-
-    Esp32HardwarePwm(pins, default_config);
+    : Esp32HardwarePwm(pins, Esp32HwPwmConfig{}) {
 }
 
 Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Esp32HwPwmConfig& config)
@@ -117,7 +113,7 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Esp32HwPwmC
     pins_.resize(pins.size());
 
     // basic sanity checks
-    if(pins.size() <= 0) {
+    if(pins.size() == 0) {
         debug_e("Pin count must be positive");
         return ;
     }
@@ -198,6 +194,7 @@ Esp32HardwarePwm::~Esp32HardwarePwm() {
         }
 
         ledc_timer_config_t timer_config = {
+            .speed_mode = timer_.speed_mode,
             .timer_num = timer_.timer_num,
             .deconfigure = true
         };
@@ -311,9 +308,9 @@ bool Esp32HardwarePwm::setPhaseShiftChan(uint8_t channel, uint32_t phase_shift, 
 
     pins_.at(channel).hpoint = phase_shift;
 
-    ledc_set_duty_with_hpoint(timer_.speed_mode, (ledc_channel_t) channel, pins_.at(channel).currentDuty, pins_.at(channel).hpoint);
+    ledc_set_duty_with_hpoint(timer_.speed_mode, pins_.at(channel).channel, pins_.at(channel).currentDuty, pins_.at(channel).hpoint);
     if (update_immediately) {
-        ledc_update_duty(timer_.speed_mode, (ledc_channel_t) channel);
+        ledc_update_duty(timer_.speed_mode, pins_.at(channel).channel);
     }
     return true;
 }
@@ -392,7 +389,10 @@ bool Esp32HardwarePwm::stop(uint8_t pin, uint8_t idle_level) {
     }
 
     auto pin_config = getPinConfig(pin);
-    
+    if(!pin_config) {
+        debug_e("Pin %d not found", pin);
+        return false;
+    }
     esp_err_t result = ledc_stop(timer_.speed_mode, pin_config->channel, idle_level);
     
     if (result == ESP_OK) {
@@ -453,7 +453,10 @@ bool Esp32HardwarePwm::fadeToValue(uint8_t pin, uint32_t target_duty, uint32_t f
     }
 
     auto pin_config = getPinConfig(pin);
-
+    if(!pin_config) {
+        debug_e("Pin %d not found", pin);
+        return false;
+    }
     uint32_t max_duty = getMaxDuty();
     if (target_duty > max_duty) {
         target_duty = max_duty;
@@ -497,8 +500,12 @@ bool Esp32HardwarePwm::setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectr
         .dispatch_method = ESP_TIMER_TASK,
         .name = "SpreadSpectrum"
     };
-    esp_timer_handle_t timer_handle;
-    esp_timer_create(&timer_args, &timer_handle);
+    esp_timer_handle_t timer_handle = nullptr;
+    esp_err_t result = esp_timer_create(&timer_args, &timer_handle);
+    if (result != ESP_OK) {
+        debug_e("Failed to create timer: %s", esp_err_to_name(result));
+        return false;
+    }
     esp_timer_start_periodic(timer_handle, interval_us);
 
     if (!timer_handle) {
@@ -515,7 +522,7 @@ void IRAM_ATTR Esp32HardwarePwm::timerIsr(void* arg) {
     self->handleSpreadSpectrum();
 }
 
-void Esp32HardwarePwm::handleSpreadSpectrum() {
+void IRAM_ATTR Esp32HardwarePwm::handleSpreadSpectrum() {
     int width = (spreadSpectrum_.WidthPercent * timer_.frequency) / 100;
     int r = esp_random() % (2 * width + 1) - width; // r in [-width, +width]
     ledc_set_freq(timer_.speed_mode, timer_.timer_num, timer_.frequency + r);

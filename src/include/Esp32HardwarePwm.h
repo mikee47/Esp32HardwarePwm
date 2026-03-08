@@ -145,18 +145,22 @@ public:
      * @param update_immediately Apply changes immediately (default: true)
      * @return true if successful, false otherwise
      */
-    bool setDuty(uint8_t pin, uint32_t duty, bool update_immediately = true){
-        return setDutyChan(getPinConfig(pin)->channel, duty, update_immediately);
-    };
+    bool setDuty(uint8_t pin, uint32_t duty, bool update_immediately = true) {
+        int idx = getPinIndex(pin);
+        if (idx < 0) return false;
+        return setDutyChan((uint8_t)idx, duty, update_immediately);
+    }
 
     /**
      * @brief Get PWM duty cycle for a specific pin
      * @param pin GPIO pin number
      * @return Current duty cycle value
      */
-    uint32_t getDuty(uint8_t pin){
-        return getDutyChan(getPinConfig(pin)->channel);
-    } ;
+    uint32_t getDuty(uint8_t pin) {
+        int idx = getPinIndex(pin);
+        if (idx < 0) return 0;
+        return getDutyChan((uint8_t)idx);
+    }
 
     uint32_t getDutyChan(uint8_t channel);
 
@@ -338,16 +342,15 @@ private:
     Esp32HwPwmPhaseShiftConfig phaseShift_;
     std::vector<HwPwmPinConfig> pins_;
 
+    int getPinIndex(uint8_t gpioPin) const {
+        for (size_t i = 0; i < pins_.size(); ++i) {
+            if (pins_[i].gpioPin == gpioPin) return (int)i;
+        }
+        return -1;
+    }
+ 
     bool initialized_=false;
     bool fadeInstalled_=false;
-
-    ledc_channel_t channelStart_=LEDC_CHANNEL_0;
-
-    //std::vector<uint8_t> pins_;
-    //size_t num_channels_ = 0;
-    //Esp32HwPwmConfig config_;
-    //uint8_t timer_num_;
-
 
     /**
      * @brief Initialize PWM instance

@@ -215,7 +215,7 @@ You can also set `Esp32HwPwmConfig.phaseShift.mode = PhaseShiftMode::MANUAL` in 
 It is generally suggested to leave phaseShift `OFF` in low current uses and `AUTO` where the switchim impact on the power lines is significant or EMI is a consideration.
 
 ##### Spread Spectrum
-
+Spread Spectrum spreads the pwm base frequency around the center frequency to reduce EMI
 
 ```cpp
 Esp32HardwarePwm(std::vector<uint8_t>& pins);
