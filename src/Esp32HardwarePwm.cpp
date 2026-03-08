@@ -194,6 +194,7 @@ Esp32HardwarePwm::~Esp32HardwarePwm() {
         }
 
         ledc_timer_config_t timer_config = {
+            .speed_mode = timer_.speed_mode,
             .timer_num = timer_.timer_num,
             .deconfigure = true
         };
