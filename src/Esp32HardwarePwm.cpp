@@ -388,7 +388,10 @@ bool Esp32HardwarePwm::stop(uint8_t pin, uint8_t idle_level) {
     }
 
     auto pin_config = getPinConfig(pin);
-    
+    if(!pin_config) {
+        debug_e("Pin %d not found", pin);
+        return false;
+    }
     esp_err_t result = ledc_stop(timer_.speed_mode, pin_config->channel, idle_level);
     
     if (result == ESP_OK) {
@@ -449,7 +452,10 @@ bool Esp32HardwarePwm::fadeToValue(uint8_t pin, uint32_t target_duty, uint32_t f
     }
 
     auto pin_config = getPinConfig(pin);
-
+    if(!pin_config) {
+        debug_e("Pin %d not found", pin);
+        return false;
+    }
     uint32_t max_duty = getMaxDuty();
     if (target_duty > max_duty) {
         target_duty = max_duty;
@@ -494,7 +500,11 @@ bool Esp32HardwarePwm::setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectr
         .name = "SpreadSpectrum"
     };
     esp_timer_handle_t timer_handle;
-    esp_timer_create(&timer_args, &timer_handle);
+    esp_err_t result = esp_timer_create(&timer_args, &timer_handle);
+    if (result != ESP_OK) {
+        debug_e("Failed to create timer: %s", esp_err_to_name(result));
+        return false;
+    }
     esp_timer_start_periodic(timer_handle, interval_us);
 
     if (!timer_handle) {
