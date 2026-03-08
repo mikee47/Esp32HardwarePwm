@@ -307,9 +307,9 @@ bool Esp32HardwarePwm::setPhaseShiftChan(uint8_t channel, uint32_t phase_shift, 
 
     pins_.at(channel).hpoint = phase_shift;
 
-    ledc_set_duty_with_hpoint(timer_.speed_mode, (ledc_channel_t) channel, pins_.at(channel).currentDuty, pins_.at(channel).hpoint);
+    ledc_set_duty_with_hpoint(timer_.speed_mode, pins_.at(channel).channel, pins_.at(channel).currentDuty, pins_.at(channel).hpoint);
     if (update_immediately) {
-        ledc_update_duty(timer_.speed_mode, (ledc_channel_t) channel);
+        ledc_update_duty(timer_.speed_mode, pins_.at(channel).channel);
     }
     return true;
 }
