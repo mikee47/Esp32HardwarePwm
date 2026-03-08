@@ -499,7 +499,7 @@ bool Esp32HardwarePwm::setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectr
         .dispatch_method = ESP_TIMER_TASK,
         .name = "SpreadSpectrum"
     };
-    esp_timer_handle_t timer_handle;
+    esp_timer_handle_t timer_handle = nullptr;
     esp_err_t result = esp_timer_create(&timer_args, &timer_handle);
     if (result != ESP_OK) {
         debug_e("Failed to create timer: %s", esp_err_to_name(result));
