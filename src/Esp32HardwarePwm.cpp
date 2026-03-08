@@ -208,6 +208,8 @@ bool Esp32HardwarePwm::initialize() {
     // Enable LEDC peripheral
     periph_module_enable(PERIPH_LEDC_MODULE);
 
+    if (!enableFade()) return false;
+
     debug_i("initialize timer");
     // initialize the timer
     ledc_timer_config_t timer_config = {
@@ -258,6 +260,12 @@ bool Esp32HardwarePwm::initialize() {
 
         debug_i("configured pin %d:\n  channel: %d\n  hpoint: %d",
             pins_.at(i).gpioPin, pins_.at(i).channel, pins_.at(i).hpoint);
+
+        ledc_cbs_t cbs = {
+            .fade_cb = &Esp32HardwarePwm::fadeDoneCallback
+        };
+        ledc_cb_register(timer_.speed_mode, pins_.at(i).channel, &cbs, this);
+        fadeDone_[i] = true; 
     }
     
     debug_i("Initialized PWM with %d pins", pins_.size());
@@ -302,7 +310,7 @@ bool Esp32HardwarePwm::setDutyChan(uint8_t channel, uint32_t duty, bool update_i
 }
 
 bool Esp32HardwarePwm::setPhaseShiftChan(uint8_t channel, uint32_t phase_shift, bool update_immediately) {
-    if (!initialized_) {
+    if (!initialized_||channel >= pins_.size()) {
         return false;
     }
 
@@ -419,20 +427,15 @@ void Esp32HardwarePwm::stopAll(uint8_t idle_level) {
 
 
 bool Esp32HardwarePwm::enableFade() {
+    if (fadeInstalled_) return true;
     
-    if (fadeInstalled_) {
-        return true;
-    }
-    
-    esp_err_t result = ledc_fade_func_install(0); // enable hardware fade with no interrupt config
-    if (result == ESP_OK) {
+    esp_err_t result = ledc_fade_func_install(0);
+    if (result == ESP_OK || result == ESP_ERR_INVALID_STATE) {
         fadeInstalled_ = true;
-        debug_i("Fade functionality enabled");
         return true;
-    } else {
-        debug_e("Failed to enable fade: %s", esp_err_to_name(result));
-        return false;
     }
+    debug_e("Failed to enable fade: %s", esp_err_to_name(result));
+    return false;
 }
 
 void Esp32HardwarePwm::disableFade() {
@@ -442,50 +445,6 @@ void Esp32HardwarePwm::disableFade() {
         fadeInstalled_ = false;
         debug_i("Fade functionality disabled");
     }
-}
-
-bool Esp32HardwarePwm::fadeToValue(uint8_t pin, uint32_t target_duty, uint32_t fade_time_ms, 
-                                   bool wait_for_completion) {
-       
-    if (!initialized_ || !fadeInstalled_) {
-        debug_e("PWM not initialized or fade not enabled");
-        return false;
-    }
-
-    auto pin_config = getPinConfig(pin);
-    if(!pin_config) {
-        debug_e("Pin %d not found", pin);
-        return false;
-    }
-    uint32_t max_duty = getMaxDuty();
-    if (target_duty > max_duty) {
-        target_duty = max_duty;
-    }
-    
-    esp_err_t result = ledc_set_fade_time_and_start(
-        timer_.speed_mode,
-        pin_config->channel,
-        target_duty,
-        fade_time_ms,
-        wait_for_completion ? LEDC_FADE_WAIT_DONE : LEDC_FADE_NO_WAIT
-    );
-    
-    if (result == ESP_OK) {
-        debug_i("Started fade on pin %d to duty %d over %d ms", pin, target_duty, fade_time_ms);
-        return true;
-    } else {
-        debug_e("Failed to start fade: %s", esp_err_to_name(result));
-        return false;
-    }
-}
-
-bool Esp32HardwarePwm::fadeToPercent(uint8_t pin, float target_percent, uint32_t fade_time_ms,
-                                     bool wait_for_completion) {
-    if (target_percent < 0.0f) target_percent = 0.0f;
-    if (target_percent > 100.0f) target_percent = 100.0f;
-    
-    uint32_t target_duty = static_cast<uint32_t>((target_percent / 100.0f) * getMaxDuty());
-    return fadeToValue(pin, target_duty, fade_time_ms, wait_for_completion);
 }
 
 bool Esp32HardwarePwm::setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectrumConfig* config) {
@@ -513,8 +472,53 @@ bool Esp32HardwarePwm::setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectr
         return false;
     }
 
-    
     return true;
+}
+
+bool Esp32HardwarePwm::fadeToValueChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms) {
+    if (!initialized_ || !fadeInstalled_ || channel_idx >= pins_.size()) return false;
+
+    uint32_t max_duty = getMaxDuty();
+    if (target_duty > max_duty) target_duty = max_duty;
+
+    fadeDone_[channel_idx] = false;
+    esp_err_t result = ledc_set_fade_time_and_start(
+        timer_.speed_mode,
+        pins_.at(channel_idx).channel,
+        target_duty,
+        fade_time_ms,
+        LEDC_FADE_NO_WAIT
+    );
+    if (result != ESP_OK) {
+        fadeDone_[channel_idx] = true;
+        debug_e("fadeToValueChan failed: %s", esp_err_to_name(result));
+        return false;
+    }
+    return true;
+}
+
+bool Esp32HardwarePwm::fadeToPercentChan(uint8_t channel_idx, float target_pct, uint32_t fade_time_ms) {
+    if (target_pct < 0.0f) target_pct = 0.0f;
+    if (target_pct > 100.0f) target_pct = 100.0f;
+    uint32_t target_duty = static_cast<uint32_t>((target_pct / 100.0f) * getMaxDuty());
+    return fadeToValueChan(channel_idx, target_duty, fade_time_ms);
+}
+
+bool Esp32HardwarePwm::isFadingChan(uint8_t channel_idx) const {
+    if (channel_idx >= pins_.size()) return false;
+    return !fadeDone_[channel_idx];
+}
+
+bool IRAM_ATTR Esp32HardwarePwm::fadeDoneCallback(const ledc_cb_param_t* param, void* arg) {
+    auto* self = static_cast<Esp32HardwarePwm*>(arg);
+    // param->channel is the hardware ledc_channel_t — find the pins_ index
+    for (size_t i = 0; i < self->pins_.size(); ++i) {
+        if (self->pins_[i].channel == param->channel) {
+            self->fadeDone_[i] = true;
+            break;
+        }
+    }
+    return false;  // no higher-priority task woken
 }
 
 void IRAM_ATTR Esp32HardwarePwm::timerIsr(void* arg) {
