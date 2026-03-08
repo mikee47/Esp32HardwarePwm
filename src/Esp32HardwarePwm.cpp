@@ -24,7 +24,6 @@
  * Reference: https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/ledc.html
  * 
  * Key Features:
- * - Automatic resource management of LEDC channels and timers
  * - Support for multiple PWM instances with different configurations
  * - Thread-safe operations
  * - Hardware fade support
@@ -102,10 +101,7 @@ typedef struct {
 //=============================================================================
 
 Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins)
-    : initialized_(false), fadeInstalled_(false) {
-    Esp32HwPwmConfig default_config;
-
-    Esp32HardwarePwm(pins, default_config);
+    : Esp32HardwarePwm(pins, Esp32HwPwmConfig{}) {
 }
 
 Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Esp32HwPwmConfig& config)
