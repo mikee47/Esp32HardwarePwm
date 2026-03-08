@@ -113,7 +113,7 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Esp32HwPwmC
     pins_.resize(pins.size());
 
     // basic sanity checks
-    if(pins.size() <= 0) {
+    if(pins.size() == 0) {
         debug_e("Pin count must be positive");
         return ;
     }

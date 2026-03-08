@@ -352,14 +352,6 @@ private:
     bool initialized_=false;
     bool fadeInstalled_=false;
 
-    ledc_channel_t channelStart_=LEDC_CHANNEL_0;
-
-    //std::vector<uint8_t> pins_;
-    //size_t num_channels_ = 0;
-    //Esp32HwPwmConfig config_;
-    //uint8_t timer_num_;
-
-
     /**
      * @brief Initialize PWM instance
      * @param pins Array of GPIO pins
