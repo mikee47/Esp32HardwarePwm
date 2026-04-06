@@ -1,3 +1,7 @@
+/**
+ * @author  Peter Jakobs http://github.com/pljakobs
+ */
+
 /****
  * ESP32 Hardware PWM - Platform Compatibility Layer
  * 

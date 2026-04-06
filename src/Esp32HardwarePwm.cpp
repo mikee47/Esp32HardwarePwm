@@ -1,3 +1,7 @@
+/**
+ * @author  Peter Jakobs http://github.com/pljakobs
+ */
+
 #include "Esp32HardwarePwm.h"
 #include <debug_progmem.h>
 #include <driver/periph_ctrl.h>
@@ -13,7 +17,6 @@
  *
  * Esp32HardwarePWM.cpp
  *
- * Original Author: https://github.com/hrsavla
  * Esp32 version:   https://github.com/pljakobs
  *
  * This Esp32HardwarePWM library enables Sming framework users to use the ESP32 LEDC PWM API
@@ -28,7 +31,12 @@
  * - Thread-safe operations
  * - Hardware fade support
  * - Phase shifting for EMI reduction
- * - Compatible with both high-speed and low-speed modes
+ * - Hardware fading leveraging the ledc_set_fade_and_start 
+ *
+ * toDo:
+ * - currently, fade does not provide any callbacks, might be worthwhile to implement them in the future
+ *   just callign that from the internal fadeDoneCallback() might be risky as that's run in an interrupt
+ * -  
  *
  ****/
 
@@ -509,7 +517,7 @@ bool Esp32HardwarePwm::isFadingChan(uint8_t channel_idx) const {
     return !fadeDone_[channel_idx];
 }
 
-bool IRAM_ATTR Esp32HardwarePwm::fadeDoneCallback(const ledc_cb_param_t* param, void* arg) {
+bool Esp32HardwarePwm::fadeDoneCallback(const ledc_cb_param_t* param, void* arg) {
     auto* self = static_cast<Esp32HardwarePwm*>(arg);
     // param->channel is the hardware ledc_channel_t — find the pins_ index
     for (size_t i = 0; i < self->pins_.size(); ++i) {
@@ -521,7 +529,7 @@ bool IRAM_ATTR Esp32HardwarePwm::fadeDoneCallback(const ledc_cb_param_t* param, 
     return false;  // no higher-priority task woken
 }
 
-void IRAM_ATTR Esp32HardwarePwm::timerIsr(void* arg) {
+void Esp32HardwarePwm::timerIsr(void* arg) {
     auto* self = static_cast<Esp32HardwarePwm*>(arg);
     self->handleSpreadSpectrum();
 }
