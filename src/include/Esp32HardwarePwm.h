@@ -1,3 +1,7 @@
+/**
+ * @author  Peter Jakobs http://github.com/pljakobs
+ */
+
 /****
  * Sming Framework Project - Open Source framework for high efficiency native ESP8266 development.
  * Created 2015 by Skurydin Alexey
@@ -314,27 +318,24 @@ public:
      */
     void disableFade();
 
-    /**
-     * @brief Start hardware fade to target duty
-     * @param pin GPIO pin number
-     * @param target_duty Target duty cycle
-     * @param fade_time_ms Fade duration in milliseconds
-     * @param wait_for_completion Block until fade completes (default: false)
-     * @return true if successful, false otherwise
+    /** Start hardware linear fade on a channel
+     * @param channel_idx  0-based index into pins[] (same as setDutyChan)
+     * @param target_duty  Target duty value (0 to getMaxDuty())
+     * @param fade_time_ms Duration in milliseconds
+     * @return true if started successfully
      */
-    bool fadeToValue(uint8_t pin, uint32_t target_duty, uint32_t fade_time_ms, 
-                     bool wait_for_completion = false);
+    bool fadeToValueChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms);
 
-    /**
-     * @brief Start hardware fade to target percentage
-     * @param pin GPIO pin number
-     * @param target_percent Target duty cycle percentage
-     * @param fade_time_ms Fade duration in milliseconds
-     * @param wait_for_completion Block until fade completes (default: false)
-     * @return true if successful, false otherwise
+    /** Start hardware linear fade to a percentage
+     * @param channel_idx  0-based index into pins[]
+     * @param target_pct   Target duty as percentage (0.0–100.0)
+     * @param fade_time_ms Duration in milliseconds
+     * @return true if started successfully
      */
-    bool fadeToPercent(uint8_t pin, float target_percent, uint32_t fade_time_ms,
-                       bool wait_for_completion = false);
+    bool fadeToPercentChan(uint8_t channel_idx, float target_pct, uint32_t fade_time_ms);
+
+    /** Returns true while a hardware fade is in progress on the given channel */
+    bool isFadingChan(uint8_t channel_idx) const;
 
 private:
     Esp32HwPwmTimerConfig timer_;
@@ -342,15 +343,12 @@ private:
     Esp32HwPwmPhaseShiftConfig phaseShift_;
     std::vector<HwPwmPinConfig> pins_;
 
-    int getPinIndex(uint8_t gpioPin) const {
-        for (size_t i = 0; i < pins_.size(); ++i) {
-            if (pins_[i].gpioPin == gpioPin) return (int)i;
-        }
-        return -1;
-    }
  
     bool initialized_=false;
     bool fadeInstalled_=false;
+
+    // Per-channel fade-done flags, set from LEDC fade callback (ISR-safe)
+    std::array<volatile bool, SOC_LEDC_CHANNEL_NUM> fadeDone_{};
 
     /**
      * @brief Initialize PWM instance
@@ -360,12 +358,18 @@ private:
      */
     bool initialize();
 
+    int getPinIndex(uint8_t gpioPin) const {
+        for (size_t i = 0; i < pins_.size(); ++i) {
+            if (pins_[i].gpioPin == gpioPin) return (int)i;
+        }
+        return -1;
+    }
+
     /**
      * @brief Get channel info for a specific pin
      * @param pin GPIO pin number
      * @return Pointer to channel info, or nullptr if pin not found
      */
-    // Const version (add this)
     HwPwmPinConfig* getPinConfig(uint8_t gpioPin)  {
         for ( auto& pin : pins_) {
             if (pin.gpioPin == gpioPin) return &pin;
@@ -391,12 +395,15 @@ private:
      **/
     bool setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectrumConfig* config);
 
-    static void IRAM_ATTR timerIsr(void* arg);
     /**
      * @brief Handle spread spectrum modulation
      */
-    void handleSpreadSpectrum();
+    void IRAM_ATTR handleSpreadSpectrum();
 
+    // Fade callback registered with ledc_cb_register per channel
+    static bool IRAM_ATTR fadeDoneCallback(const ledc_cb_param_t* param, void* arg);
+
+    static void IRAM_ATTR timerIsr(void* arg);
 };
 
 
