@@ -36,18 +36,13 @@
 
 #pragma once
 
-#include <SmingCore.h>
 #include <cstdint>
 #include <vector>
-#include <memory>
 #include <driver/ledc.h>
-#include <hal/ledc_types.h>
 #include <soc/soc_caps.h>
-#include "Esp32PwmPlatform.h"
-#include <esp_timer.h>
 #include <array>
 
-#define PWM_BAD_CHANNEL 0xff ///< Invalid PWM channel
+//#define PWM_BAD_CHANNEL 0xff ///< Invalid PWM channel
 
 /**
  * @brief PWM Channel information
@@ -62,46 +57,9 @@ struct PwmChannelInfo {
     bool isActive = false;                           ///< Channel active status
 };
 */
-struct HwPwmPinConfig{
-    uint8_t gpioPin=0;
-    ledc_channel_t  channel=LEDC_CHANNEL_0;
-    uint32_t currentDuty=0;
-    int hpoint=0;
-    bool isActive=false;
-};
 
-/**
- * @brief ESP32 PWM Configuration parameters
- */
 
-enum class PhaseShiftMode : uint8_t { OFF, AUTO, MANUAL };
-enum class SpreadSpectrumMode : uint8_t { OFF, ON };
 
-struct Esp32HwPwmPhaseShiftConfig {
-    PhaseShiftMode mode = PhaseShiftMode::OFF;
-    std::vector<int> manual_hpoints = {};
-};
-
-struct Esp32HwPwmSpreadSpectrumConfig {
-    SpreadSpectrumMode mode = SpreadSpectrumMode::OFF;
-    uint8_t WidthPercent = 0;
-    uint16_t Subsampling = 0;
-};
-
-struct Esp32HwPwmTimerConfig {
-    ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;
-    ledc_timer_bit_t resolution = LEDC_TIMER_10_BIT;
-    ledc_timer_t timer_num = LEDC_TIMER_0;
-    uint32_t frequency = 1000;
-    ledc_clk_cfg_t clk_cfg = LEDC_AUTO_CLK;
-};
-
-struct Esp32HwPwmConfig {
-    ledc_channel_t channelStart = LEDC_CHANNEL_0;
-    Esp32HwPwmTimerConfig timer = {};
-    Esp32HwPwmPhaseShiftConfig phaseShift = {};
-    Esp32HwPwmSpreadSpectrumConfig spreadSpectrum = {};
-};
 
 /**
  * @brief ESP32 Hardware PWM class
@@ -135,7 +93,7 @@ public:
     /**
      * @brief Destructor - automatically releases all allocated resources
      */
-    virtual ~Esp32HardwarePwm();
+    ~Esp32HardwarePwm();
 
     // Disable copy constructor and assignment operator to prevent resource conflicts
     Esp32HardwarePwm(const Esp32HardwarePwm&) = delete;
@@ -337,11 +295,52 @@ public:
     /** Returns true while a hardware fade is in progress on the given channel */
     bool isFadingChan(uint8_t channel_idx) const;
 
+    struct PinConfig{
+        uint8_t gpioPin=0;
+        ledc_channel_t  channel=LEDC_CHANNEL_0;
+        uint32_t currentDuty=0;
+        int hpoint=0;
+        bool isActive=false;
+    };
+
+    /**
+ * @brief ESP32 PWM Configuration parameters
+ */
+
+    enum class PhaseShiftMode : uint8_t { OFF, AUTO, MANUAL };
+    enum class SpreadSpectrumMode : uint8_t { OFF, ON };
+
+    struct PhaseShiftConfig {
+        PhaseShiftMode mode = PhaseShiftMode::OFF;
+        std::vector<int> manual_hpoints = {};
+    };
+
+    struct SpreadSpectrumConfig {
+        SpreadSpectrumMode mode = SpreadSpectrumMode::OFF;
+        uint8_t WidthPercent = 0;
+        uint16_t Subsampling = 0;
+    };
+
+    struct TimerConfig {
+        ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;
+        ledc_timer_bit_t resolution = LEDC_TIMER_10_BIT;
+        ledc_timer_t timer_num = LEDC_TIMER_0;
+        uint32_t frequency = 1000;
+        ledc_clk_cfg_t clk_cfg = LEDC_AUTO_CLK;
+    };
+
+    struct Config {
+        ledc_channel_t channelStart = LEDC_CHANNEL_0;
+        TimerConfig timer = {};
+        PhaseShiftConfig phaseShift = {};
+        SpreadSpectrumConfig spreadSpectrum = {};
+    };
+
 private:
-    Esp32HwPwmTimerConfig timer_;
-    Esp32HwPwmSpreadSpectrumConfig spreadSpectrum_;
-    Esp32HwPwmPhaseShiftConfig phaseShift_;
-    std::vector<HwPwmPinConfig> pins_;
+    TimerConfig timer_;
+    SpreadSpectrumConfig spreadSpectrum_;
+    PhaseShiftConfig phaseShift_;
+    std::vector<PinConfig> pins_;
 
  
     bool initialized_=false;
@@ -370,7 +369,7 @@ private:
      * @param pin GPIO pin number
      * @return Pointer to channel info, or nullptr if pin not found
      */
-    HwPwmPinConfig* getPinConfig(uint8_t gpioPin)  {
+    PinConfig* getPinConfig(uint8_t gpioPin)  {
         for ( auto& pin : pins_) {
             if (pin.gpioPin == gpioPin) return &pin;
         }
@@ -393,7 +392,7 @@ private:
      * @param config Spread spectrum configuration
      * @return true if successful, false otherwise
      **/
-    bool setupSpreadSpectrum(int frequency, Esp32HwPwmSpreadSpectrumConfig* config);
+    bool setupSpreadSpectrum(int frequency, SpreadSpectrumConfig* config);
 
     /**
      * @brief Handle spread spectrum modulation
