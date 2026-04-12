@@ -52,6 +52,52 @@ public:
      */
     using DutyCycle = float;
 
+    // -----------------------------------------------------------------------
+    // Configuration types — declared before constructors so they are visible
+    // in constructor parameter lists.
+    // -----------------------------------------------------------------------
+
+    enum class PhaseShiftMode : uint8_t {
+        OFF,    ///< No phase shifting
+        AUTO,   ///< Automatic phase shifting based on channel index
+        MANUAL, ///< Manual phase shifting using provided hpoint values
+    };
+
+    enum class SpreadSpectrumMode : uint8_t {
+        OFF, ///< Spread spectrum disabled
+        ON,  ///< Spread spectrum enabled
+    };
+
+    struct PhaseShiftConfig {
+        PhaseShiftMode mode = PhaseShiftMode::OFF;    ///< Phase shift mode
+        std::vector<int> manual_hpoints = {};          ///< hpoint values for MANUAL mode, one per pin
+    };
+
+    struct SpreadSpectrumConfig {
+        SpreadSpectrumMode mode = SpreadSpectrumMode::OFF; ///< Spread spectrum mode
+        uint8_t WidthPercent = 0;   ///< Frequency deviation as percentage of base frequency
+        uint16_t Subsampling = 0;   ///< Number of PWM cycles between frequency updates
+    };
+
+    struct TimerConfig {
+        ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;    ///< LEDC speed mode
+        ledc_timer_bit_t resolution = LEDC_TIMER_10_BIT; ///< Duty resolution in bits
+        ledc_timer_t timer_num = LEDC_TIMER_0;           ///< LEDC timer index
+        uint32_t frequency = 1000;                       ///< PWM frequency in Hz
+        ledc_clk_cfg_t clk_cfg = LEDC_AUTO_CLK;          ///< Clock source
+    };
+
+    struct Config {
+        ledc_channel_t channelStart = LEDC_CHANNEL_0; ///< First LEDC channel to allocate
+        TimerConfig timer = {};                         ///< Timer configuration
+        PhaseShiftConfig phaseShift = {};               ///< Phase shift configuration
+        SpreadSpectrumConfig spreadSpectrum = {};        ///< Spread spectrum configuration
+    };
+
+    // -----------------------------------------------------------------------
+    // Constructors / destructor
+    // -----------------------------------------------------------------------
+
     /**
      * @brief Construct PWM instance with default configuration
      * @param pins Vector of GPIO pins to control
@@ -269,47 +315,6 @@ public:
 
     /** Returns true while a hardware fade is in progress on the given channel */
     bool isFadingChan(uint8_t channel_idx) const;
-
-    /**
-     * @brief ESP32 PWM configuration parameters
-     */
-
-    enum class PhaseShiftMode : uint8_t {
-        OFF,    ///< No phase shifting
-        AUTO,   ///< Automatic phase shifting based on channel index
-        MANUAL, ///< Manual phase shifting using provided hpoint values
-    };
-
-    enum class SpreadSpectrumMode : uint8_t {
-        OFF, ///< Spread spectrum disabled
-        ON,  ///< Spread spectrum enabled
-    };
-
-    struct PhaseShiftConfig {
-        PhaseShiftMode mode = PhaseShiftMode::OFF;    ///< Phase shift mode
-        std::vector<int> manual_hpoints = {};          ///< hpoint values for MANUAL mode, one per pin
-    };
-
-    struct SpreadSpectrumConfig {
-        SpreadSpectrumMode mode = SpreadSpectrumMode::OFF; ///< Spread spectrum mode
-        uint8_t WidthPercent = 0;   ///< Frequency deviation as percentage of base frequency
-        uint16_t Subsampling = 0;   ///< Number of PWM cycles between frequency updates
-    };
-
-    struct TimerConfig {
-        ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;    ///< LEDC speed mode
-        ledc_timer_bit_t resolution = LEDC_TIMER_10_BIT; ///< Duty resolution in bits
-        ledc_timer_t timer_num = LEDC_TIMER_0;           ///< LEDC timer index
-        uint32_t frequency = 1000;                       ///< PWM frequency in Hz
-        ledc_clk_cfg_t clk_cfg = LEDC_AUTO_CLK;          ///< Clock source
-    };
-
-    struct Config {
-        ledc_channel_t channelStart = LEDC_CHANNEL_0; ///< First LEDC channel to allocate
-        TimerConfig timer = {};                         ///< Timer configuration
-        PhaseShiftConfig phaseShift = {};               ///< Phase shift configuration
-        SpreadSpectrumConfig spreadSpectrum = {};        ///< Spread spectrum configuration
-    };
 
 private:
     struct PinConfig {
