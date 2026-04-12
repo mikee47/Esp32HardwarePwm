@@ -1,38 +1,25 @@
 /**
- * @author  Peter Jakobs http://github.com/pljakobs
- */
-
-/****
+ * @file
+ * @brief  ESP32 Hardware PWM (LEDC) driver
+ * @author Peter Jakobs http://github.com/pljakobs
+ *
  * Sming Framework Project - Open Source framework for high efficiency native ESP8266 development.
  * Created 2015 by Skurydin Alexey
  * http://github.com/SmingHub/Sming
  * All files of the Sming Core are provided under the LGPL v3 license.
  *
- * Esp32HardwarePWM.h
- *
- * Original Author: https://github.com/hrsavla
- * Esp32 version:   https://github.com/pljakobs
- *
- * This Esp32HardwarePWM library enables Sming framework users to use the ESP32 LEDC PWM API
- * 
- * The ESP32 PWM Hardware is much more powerful than the ESP8266, allowing wider PWM timers (up to 20 bit)
- * as well as much higher PWM frequencies (up to 40MHz for a 1 Bit wide PWM)
- * 
- * Features:
- * - Multiple PWM instances with independent configurations
- * - Automatic resource management (channels and timers)
- * - Support for high-speed and low-speed modes
- * - Configurable duty resolution (1-20 bits)
- * - Phase shifting for EMI reduction
- * - Hardware fade support
- * - Thread-safe operations
- *
- ****/
+ * This library wraps the ESP32 LEDC peripheral to provide hardware PWM with:
+ * - Configurable duty resolution (1-20 bits) and frequency
+ * - Multiple independent instances with distinct timer configurations
+ * - Phase shifting (hpoint) for EMI/noise/power-spike reduction
+ * - Spread spectrum modulation
+ * - Hardware-accelerated linear fading
+ */
 
-/** @defgroup   esp32_hw_pwm ESP32 Hardware PWM functions
- *  @brief      Provides ESP32 LEDC hardware pulse width spread spectrum functions
+/** @defgroup esp32_hw_pwm ESP32 Hardware PWM
+ *  @brief    ESP32 LEDC hardware PWM driver
  *  @{
-*/
+ */
 
 #pragma once
 
@@ -41,25 +28,6 @@
 #include <driver/ledc.h>
 #include <soc/soc_caps.h>
 #include <array>
-
-//#define PWM_BAD_CHANNEL 0xff ///< Invalid PWM channel
-
-/**
- * @brief PWM Channel information
- */
-/*
-struct PwmChannelInfo {
-    uint8_t gpioPin = 0;                             ///< GPIO pin number
-    ledc_channel_t channel = LEDC_CHANNEL_0;          ///< LEDC channel
-    ledc_timer_t timer = LEDC_TIMER_0;                ///< Associated timer
-    ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;     ///< Speed mode
-    uint32_t currentDuty = 0;                        ///< Current duty cycle
-    bool isActive = false;                           ///< Channel active status
-};
-*/
-
-
-
 
 /**
  * @brief ESP32 Hardware PWM class
@@ -77,6 +45,13 @@ struct PwmChannelInfo {
  */
 class Esp32HardwarePwm {
 public:
+    static constexpr uint8_t BadChannel = 0xff; ///< Invalid PWM channel indicator
+
+    /**
+     * @brief Defines PWM duty cycle percentage (0.0 = off, 100.0 = full on)
+     */
+    using DutyCycle = float;
+
     /**
      * @brief Construct PWM instance with default configuration
      * @param pins Vector of GPIO pins to control
@@ -88,7 +63,7 @@ public:
      * @param pins Vector of GPIO pins to control
      * @param config PWM configuration parameters
      */
-    Esp32HardwarePwm(std::vector<uint8_t>& pins, const Esp32HwPwmConfig& config);
+    Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& config);
 
     /**
      * @brief Destructor - automatically releases all allocated resources
@@ -135,7 +110,7 @@ public:
      * @param update_immediately Apply changes immediately (default: true)
      * @return true if successful, false otherwise
      */
-    bool setDutyChanPercent(uint8_t channel, float percentage, bool update_immediately = true){
+    bool setDutyChanPercent(uint8_t channel, DutyCycle percentage, bool update_immediately = true){
         if (percentage < 0.0f) percentage = 0.0f;
         if (percentage > 100.0f) percentage = 100.0f;
 
@@ -148,7 +123,7 @@ public:
      * @param channel channel index 
      * @return Duty cycle percentage (0.0 to 100.0)
      */
-    float getDutyChanPercent(uint8_t channel) {
+    DutyCycle getDutyChanPercent(uint8_t channel) {
         uint32_t duty = getDutyChan(channel);
         uint32_t max_duty = getMaxDuty();
         
@@ -233,7 +208,7 @@ public:
      * @param idle_level Level to set pin when stopped (0 or 1)
      * @return true if successful, false otherwise
      */
-    bool stop(uint8_t pin, uint8_t idle_level = 0);
+    bool stop(uint8_t pin, bool idle_level = LOW);
 
     /**
      * @brief Start PWM output on all pins
@@ -244,7 +219,7 @@ public:
      * @brief Stop PWM output on all pins
      * @param idle_level Level to set pins when stopped (0 or 1)
      */
-    void stopAll(uint8_t idle_level = 0);
+    void stopAll(bool idle_level = LOW);
 
     /**
      * @brief Get total number of configured pins
@@ -290,53 +265,61 @@ public:
      * @param fade_time_ms Duration in milliseconds
      * @return true if started successfully
      */
-    bool fadeToPercentChan(uint8_t channel_idx, float target_pct, uint32_t fade_time_ms);
+    bool fadeToPercentChan(uint8_t channel_idx, DutyCycle target_pct, uint32_t fade_time_ms);
 
     /** Returns true while a hardware fade is in progress on the given channel */
     bool isFadingChan(uint8_t channel_idx) const;
 
-    struct PinConfig{
-        uint8_t gpioPin=0;
-        ledc_channel_t  channel=LEDC_CHANNEL_0;
-        uint32_t currentDuty=0;
-        int hpoint=0;
-        bool isActive=false;
+    /**
+     * @brief ESP32 PWM configuration parameters
+     */
+
+    enum class PhaseShiftMode : uint8_t {
+        OFF,    ///< No phase shifting
+        AUTO,   ///< Automatic phase shifting based on channel index
+        MANUAL, ///< Manual phase shifting using provided hpoint values
     };
 
-    /**
- * @brief ESP32 PWM Configuration parameters
- */
-
-    enum class PhaseShiftMode : uint8_t { OFF, AUTO, MANUAL };
-    enum class SpreadSpectrumMode : uint8_t { OFF, ON };
+    enum class SpreadSpectrumMode : uint8_t {
+        OFF, ///< Spread spectrum disabled
+        ON,  ///< Spread spectrum enabled
+    };
 
     struct PhaseShiftConfig {
-        PhaseShiftMode mode = PhaseShiftMode::OFF;
-        std::vector<int> manual_hpoints = {};
+        PhaseShiftMode mode = PhaseShiftMode::OFF;    ///< Phase shift mode
+        std::vector<int> manual_hpoints = {};          ///< hpoint values for MANUAL mode, one per pin
     };
 
     struct SpreadSpectrumConfig {
-        SpreadSpectrumMode mode = SpreadSpectrumMode::OFF;
-        uint8_t WidthPercent = 0;
-        uint16_t Subsampling = 0;
+        SpreadSpectrumMode mode = SpreadSpectrumMode::OFF; ///< Spread spectrum mode
+        uint8_t WidthPercent = 0;   ///< Frequency deviation as percentage of base frequency
+        uint16_t Subsampling = 0;   ///< Number of PWM cycles between frequency updates
     };
 
     struct TimerConfig {
-        ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;
-        ledc_timer_bit_t resolution = LEDC_TIMER_10_BIT;
-        ledc_timer_t timer_num = LEDC_TIMER_0;
-        uint32_t frequency = 1000;
-        ledc_clk_cfg_t clk_cfg = LEDC_AUTO_CLK;
+        ledc_mode_t speed_mode = LEDC_LOW_SPEED_MODE;    ///< LEDC speed mode
+        ledc_timer_bit_t resolution = LEDC_TIMER_10_BIT; ///< Duty resolution in bits
+        ledc_timer_t timer_num = LEDC_TIMER_0;           ///< LEDC timer index
+        uint32_t frequency = 1000;                       ///< PWM frequency in Hz
+        ledc_clk_cfg_t clk_cfg = LEDC_AUTO_CLK;          ///< Clock source
     };
 
     struct Config {
-        ledc_channel_t channelStart = LEDC_CHANNEL_0;
-        TimerConfig timer = {};
-        PhaseShiftConfig phaseShift = {};
-        SpreadSpectrumConfig spreadSpectrum = {};
+        ledc_channel_t channelStart = LEDC_CHANNEL_0; ///< First LEDC channel to allocate
+        TimerConfig timer = {};                         ///< Timer configuration
+        PhaseShiftConfig phaseShift = {};               ///< Phase shift configuration
+        SpreadSpectrumConfig spreadSpectrum = {};        ///< Spread spectrum configuration
     };
 
 private:
+    struct PinConfig {
+        uint8_t gpioPin = 0;                          ///< GPIO pin number
+        ledc_channel_t channel = LEDC_CHANNEL_0;      ///< LEDC hardware channel
+        uint32_t currentDuty = 0;                     ///< Last duty value written
+        int hpoint = 0;                               ///< Phase shift hpoint
+        bool isActive = false;                        ///< True when channel is running
+    };
+
     TimerConfig timer_;
     SpreadSpectrumConfig spreadSpectrum_;
     PhaseShiftConfig phaseShift_;
@@ -392,17 +375,17 @@ private:
      * @param config Spread spectrum configuration
      * @return true if successful, false otherwise
      **/
-    bool setupSpreadSpectrum(int frequency, SpreadSpectrumConfig* config);
+    bool setupSpreadSpectrum(int frequency, SpreadSpectrumConfig& config);
 
     /**
      * @brief Handle spread spectrum modulation
      */
-    void IRAM_ATTR handleSpreadSpectrum();
+    void IRAM_ATTR handleSpreadSpectrum(); ///< Placed in IRAM for deterministic latency at kHz call rates
 
     // Fade callback registered with ledc_cb_register per channel
     static bool IRAM_ATTR fadeDoneCallback(const ledc_cb_param_t* param, void* arg);
 
-    static void IRAM_ATTR timerIsr(void* arg);
+    static void IRAM_ATTR timerIsr(void* arg); ///< Placed in IRAM for deterministic latency at kHz call rates
 };
 
 

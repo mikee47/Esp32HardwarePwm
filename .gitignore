@@ -58,6 +58,11 @@ out/
 .idea/
 *.iml
 
+# Working / review notes (not part of the shipped source)
+src/plan.md
+src/review.md
+src/interfaceChange.md
+
 # Sming specific
 out/
 .vscode/c_cpp_properties.json
