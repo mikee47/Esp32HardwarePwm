@@ -6,6 +6,8 @@
 #include <debug_progmem.h>
 #include <driver/periph_ctrl.h>
 #include <esp_err.h>
+#include <esp_random.h>
+#include <esp_timer.h>
 #include <algorithm>
 #include <cassert>
 
@@ -489,12 +491,12 @@ bool Esp32HardwarePwm::fadeDoneCallback(const ledc_cb_param_t* param, void* arg)
     return false;  // no higher-priority task woken
 }
 
-void IRAM_ATTR Esp32HardwarePwm::timerIsr(void* arg) {
+void Esp32HardwarePwm::timerIsr(void* arg) {
     auto* self = static_cast<Esp32HardwarePwm*>(arg);
     self->handleSpreadSpectrum();
 }
 
-void IRAM_ATTR Esp32HardwarePwm::handleSpreadSpectrum() {
+void Esp32HardwarePwm::handleSpreadSpectrum() {
     int width = (spreadSpectrum_.WidthPercent * timer_.frequency) / 100;
     int r = esp_random() % (2 * width + 1) - width; // r in [-width, +width]
     ledc_set_freq(timer_.speed_mode, timer_.timer_num, timer_.frequency + r);

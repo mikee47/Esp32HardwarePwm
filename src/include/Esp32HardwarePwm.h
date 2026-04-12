@@ -28,6 +28,7 @@
 #include <driver/ledc.h>
 #include <soc/soc_caps.h>
 #include <array>
+#include <esp_attr.h>
 
 /**
  * @brief ESP32 Hardware PWM class
@@ -254,7 +255,7 @@ public:
      * @param idle_level Level to set pin when stopped (0 or 1)
      * @return true if successful, false otherwise
      */
-    bool stop(uint8_t pin, bool idle_level = LOW);
+    bool stop(uint8_t pin, bool idle_level = false);
 
     /**
      * @brief Start PWM output on all pins
@@ -265,7 +266,7 @@ public:
      * @brief Stop PWM output on all pins
      * @param idle_level Level to set pins when stopped (0 or 1)
      */
-    void stopAll(bool idle_level = LOW);
+    void stopAll(bool idle_level = false);
 
     /**
      * @brief Get total number of configured pins
@@ -385,12 +386,12 @@ private:
     /**
      * @brief Handle spread spectrum modulation
      */
-    void IRAM_ATTR handleSpreadSpectrum(); ///< Placed in IRAM for deterministic latency at kHz call rates
+    IRAM_ATTR  void  handleSpreadSpectrum(); // placed in IRAM to reduce latency at kHz call rates
 
     // Fade callback registered with ledc_cb_register per channel
     static bool IRAM_ATTR fadeDoneCallback(const ledc_cb_param_t* param, void* arg);
 
-    static void IRAM_ATTR timerIsr(void* arg); ///< Placed in IRAM for deterministic latency at kHz call rates
+    static IRAM_ATTR void timerIsr(void* arg); // placed in IRAM to reduce latency at kHz call rates
 };
 
 
