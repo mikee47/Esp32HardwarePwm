@@ -1,0 +1,4 @@
+DISABLE_NETWORK := 1
+
+COMPONENT_DEPENDS := Esp32HardwarePwm
+

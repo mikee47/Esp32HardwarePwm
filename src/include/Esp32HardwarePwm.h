@@ -122,8 +122,176 @@ public:
 	Esp32HardwarePwm(const Esp32HardwarePwm&) = delete;
 	Esp32HardwarePwm& operator=(const Esp32HardwarePwm&) = delete;
 
-	/**
-     * @brief Set PWM duty cycle for a specific pin
+	// -----------------------------------------------------------------------
+	// Timer / global configuration
+	// -----------------------------------------------------------------------
+
+	/** @brief Change PWM frequency for all channels
+     * @param frequency New frequency in Hz
+     * @return true if successful, false otherwise
+     * @note This affects all channels sharing the same timer
+     */
+	bool setFrequency(uint32_t frequency);
+
+	/** @brief Get current PWM frequency
+     * @return Frequency in Hz
+     */
+	uint32_t getFrequency() const;
+
+	/** @brief Set PWM period in microseconds
+     * @param period_us Period in microseconds
+     * @return true if successful, false otherwise
+     */
+	bool setPeriod(uint32_t period_us);
+
+	/** @brief Get PWM period in microseconds
+     * @return Period in microseconds
+     */
+	uint32_t getPeriod() const;
+
+	/** @brief Get maximum duty cycle value
+     * @return Maximum duty value based on resolution
+     */
+	uint32_t getMaxDuty() const;
+
+	/** @brief Get duty resolution in bits
+     * @return Resolution in bits (1-20)
+     */
+	uint8_t getResolution() const;
+
+	/** @brief Get total number of configured channels
+     * @return Number of channels
+     */
+	uint8_t getPinCount() const
+	{
+		return static_cast<uint8_t>(pins_.size());
+	}
+
+	/** @brief Check if PWM instance is properly initialized
+     * @return true if initialized, false otherwise
+     */
+	bool isInitialized() const
+	{
+		return initialized_;
+	}
+
+	/** @brief Apply pending duty changes to all channels
+     * @note Only needed when update_immediately was set to false
+     */
+	void update();
+
+	/** @brief Stop PWM output on all channels
+     * @param idle_level Level to set pins when stopped (0 or 1)
+     */
+	void stopAll(bool idle_level = false);
+
+	// -----------------------------------------------------------------------
+	// Primary interface — channel-indexed (preferred)
+	// Channel index is the 0-based position in the pins[] vector passed to
+	// the constructor, independent of GPIO number or LEDC hardware channel.
+	// -----------------------------------------------------------------------
+
+	/** @brief Set duty cycle for a channel (absolute value)
+     * @param channel Channel index
+     * @param duty Duty cycle value (0 to getMaxDuty())
+     * @param update_immediately Apply changes immediately (default: true)
+     * @return true if successful, false otherwise
+     */
+	bool setDutyChan(uint8_t channel, uint32_t duty, bool update_immediately = true);
+
+	/** @brief Get duty cycle for a channel (absolute value)
+     * @param channel Channel index
+     * @return Current duty cycle value (0 to getMaxDuty())
+     */
+	uint32_t getDutyChan(uint8_t channel);
+
+	/** @brief Set duty cycle for a channel as a percentage
+     * @param channel Channel index
+     * @param percentage Duty cycle percentage (0.0 to 100.0)
+     * @param update_immediately Apply changes immediately (default: true)
+     * @return true if successful, false otherwise
+     */
+	bool setDutyChanPercent(uint8_t channel, DutyCycle percentage, bool update_immediately = true)
+	{
+		if(percentage < 0.0f)
+			percentage = 0.0f;
+		if(percentage > 100.0f)
+			percentage = 100.0f;
+		uint32_t duty = static_cast<uint32_t>(percentage * getMaxDuty() / 100.0f);
+		return setDutyChan(channel, duty, update_immediately);
+	}
+
+	/** @brief Get duty cycle for a channel as a percentage
+     * @param channel Channel index
+     * @return Duty cycle percentage (0.0 to 100.0)
+     */
+	DutyCycle getDutyChanPercent(uint8_t channel)
+	{
+		uint32_t duty = getDutyChan(channel);
+		uint32_t max_duty = getMaxDuty();
+		if(max_duty == 0)
+			return 0.0f;
+		return (static_cast<float>(duty) / max_duty) * 100.0f;
+	}
+
+	/** @brief Set phase shift for a channel (absolute hpoint value)
+     * @param channel Channel index
+     * @param phase_shift Phase shift value in PWM resolution counts (0 to getMaxDuty())
+     * @param update_immediately Apply changes immediately (default: true)
+     * @return true if successful, false otherwise
+     */
+	bool setPhaseShiftChan(uint8_t channel, uint32_t phase_shift, bool update_immediately = true);
+
+	/** @brief Set phase shift for a channel as a percentage of the PWM period
+     * @param channel Channel index
+     * @param percentage Phase shift percentage (0.0 = no shift, 100.0 = full period)
+     * @param update_immediately Apply changes immediately (default: true)
+     * @return true if successful, false otherwise
+     */
+	bool setPhaseShiftChanPercent(uint8_t channel, DutyCycle percentage, bool update_immediately = true)
+	{
+		if(percentage < 0.0f)
+			percentage = 0.0f;
+		if(percentage > 100.0f)
+			percentage = 100.0f;
+		uint32_t phase_shift = static_cast<uint32_t>(percentage * getMaxDuty() / 100.0f);
+		return setPhaseShiftChan(channel, phase_shift, update_immediately);
+	}
+
+	/** @brief Enable hardware fade functionality
+     * @return true if successful, false otherwise
+     * @note Called automatically by the constructor; exposed for manual control.
+     */
+	bool enableFade();
+
+	/** @brief Disable hardware fade functionality */
+	void disableFade();
+
+	/** @brief Start hardware linear fade on a channel (absolute target)
+     * @param channel_idx Channel index
+     * @param target_duty Target duty value (0 to getMaxDuty())
+     * @param fade_time_ms Duration in milliseconds
+     * @return true if started successfully
+     */
+	bool fadeToValueChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms);
+
+	/** @brief Start hardware linear fade on a channel (percentage target)
+     * @param channel_idx Channel index
+     * @param target_pct Target duty as percentage (0.0–100.0)
+     * @param fade_time_ms Duration in milliseconds
+     * @return true if started successfully
+     */
+	bool fadeToPercentChan(uint8_t channel_idx, DutyCycle target_pct, uint32_t fade_time_ms);
+
+	/** @brief Returns true while a hardware fade is in progress on the given channel */
+	bool isFadingChan(uint8_t channel_idx) const;
+
+	
+	// -----------------------------------------------------------------------
+	// Legacy interface — GPIO-pin-indexed (use channel interface for new code)
+	// -----------------------------------------------------------------------
+
+	/** @brief Set PWM duty cycle for a specific pin (legacy)
      * @param pin GPIO pin number
      * @param duty Duty cycle value (0 to getMaxDuty())
      * @param update_immediately Apply changes immediately (default: true)
@@ -137,8 +305,7 @@ public:
 		return setDutyChan((uint8_t)idx, duty, update_immediately);
 	}
 
-	/**
-     * @brief Get PWM duty cycle for a specific pin
+	/** @brief Get PWM duty cycle for a specific pin (legacy)
      * @param pin GPIO pin number
      * @return Current duty cycle value
      */
@@ -150,46 +317,7 @@ public:
 		return getDutyChan((uint8_t)idx);
 	}
 
-	uint32_t getDutyChan(uint8_t channel);
-
-	bool setDutyChan(uint8_t channel, uint32_t duty, bool update_immediately = true);
-
-	/**
-     * @brief Set duty cycle as percentage (0.0 to 100.0)
-     * @param channel channel index 
-     * @param percentage Duty cycle percentage
-     * @param update_immediately Apply changes immediately (default: true)
-     * @return true if successful, false otherwise
-     */
-	bool setDutyChanPercent(uint8_t channel, DutyCycle percentage, bool update_immediately = true)
-	{
-		if(percentage < 0.0f)
-			percentage = 0.0f;
-		if(percentage > 100.0f)
-			percentage = 100.0f;
-
-		uint32_t duty = static_cast<uint32_t>(percentage * getMaxDuty() / 100.0f);
-		return setDutyChan(channel, duty, update_immediately);
-	};
-
-	/**
-     * @brief Get duty cycle as percentage
-     * @param channel channel index 
-     * @return Duty cycle percentage (0.0 to 100.0)
-     */
-	DutyCycle getDutyChanPercent(uint8_t channel)
-	{
-		uint32_t duty = getDutyChan(channel);
-		uint32_t max_duty = getMaxDuty();
-
-		if(max_duty == 0)
-			return 0.0f;
-
-		return (static_cast<float>(duty) / max_duty) * 100.0f;
-	};
-
-	/**
-     * @brief Arduino-style analogWrite function
+	/** @brief Arduino-style analogWrite (legacy)
      * @param pin GPIO pin number
      * @param duty Duty cycle value
      * @return true if successful, false otherwise
@@ -199,134 +327,21 @@ public:
 		return setDuty(pin, duty);
 	}
 
-	/** @brief change the phase shift for a given pin
-     * @param pin GPIO pin number
-     * @param phase_shift Phase shift value in points pwm resolution
-     * @return true if successful, false otherwise
-     */
-	bool setPhaseShiftChan(uint8_t pin, uint32_t phase_shift, bool update_immediately = true);
-
-	/**
-     * @brief Change PWM frequency for all channels
-     * @param frequency New frequency in Hz
-     * @return true if successful, false otherwise
-     * @note This affects all channels using the same timer
-     */
-	bool setFrequency(uint32_t frequency);
-
-	/**
-     * @brief Get current PWM frequency
-     * @return Frequency in Hz
-     */
-	uint32_t getFrequency() const;
-
-	/**
-     * @brief Set PWM period in microseconds
-     * @param period_us Period in microseconds
-     * @return true if successful, false otherwise
-     */
-	bool setPeriod(uint32_t period_us);
-
-	/**
-     * @brief Get PWM period in microseconds
-     * @return Period in microseconds
-     */
-	uint32_t getPeriod() const;
-
-	/**
-     * @brief Get maximum duty cycle value
-     * @return Maximum duty value based on resolution
-     */
-	uint32_t getMaxDuty() const;
-
-	/**
-     * @brief Get duty resolution in bits
-     * @return Resolution in bits (1-20)
-     */
-	uint8_t getResolution() const;
-
-	/**
-     * @brief Update all PWM outputs (apply pending changes)auto pin : pins_
-     * @note Only needed when update_immediately was set to false
-     */
-	void update();
-
-	/**
-     * @brief Start PWM output on a specific pin
+	/** @brief Start PWM output on a specific pin (legacy)
      * @param pin GPIO pin number
      * @return true if successful, false otherwise
      */
 	bool start(uint8_t pin);
 
-	/**
-     * @brief Stop PWM output on a specific pin
+	/** @brief Stop PWM output on a specific pin (legacy)
      * @param pin GPIO pin number
      * @param idle_level Level to set pin when stopped (0 or 1)
      * @return true if successful, false otherwise
      */
 	bool stop(uint8_t pin, bool idle_level = false);
 
-	/**
-     * @brief Start PWM output on all pins
-     */
+	/** @brief Start PWM output on all pins (legacy) */
 	void startAll();
-
-	/**
-     * @brief Stop PWM output on all pins
-     * @param idle_level Level to set pins when stopped (0 or 1)
-     */
-	void stopAll(bool idle_level = false);
-
-	/**
-     * @brief Get total number of configured pins
-     * @return Number of pins
-     */
-	uint8_t getPinCount() const
-	{
-		return static_cast<uint8_t>(pins_.size());
-	};
-
-	/**
-     * @brief Check if PWM instance is properly initialized
-     * @return true if initialized, false otherwise
-     */
-	bool isInitialized() const
-	{
-		return initialized_;
-	};
-
-	// Hardware fade functions (if enabled in config)
-
-	/**
-     * @brief Enable hardware fade functionality
-     * @return true if successful, false otherwise
-     * @note Must be called before using fade functions
-     */
-	bool enableFade();
-
-	/**
-     * @brief Disable hardware fade functionality
-     */
-	void disableFade();
-
-	/** Start hardware linear fade on a channel
-     * @param channel_idx  0-based index into pins[] (same as setDutyChan)
-     * @param target_duty  Target duty value (0 to getMaxDuty())
-     * @param fade_time_ms Duration in milliseconds
-     * @return true if started successfully
-     */
-	bool fadeToValueChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms);
-
-	/** Start hardware linear fade to a percentage
-     * @param channel_idx  0-based index into pins[]
-     * @param target_pct   Target duty as percentage (0.0–100.0)
-     * @param fade_time_ms Duration in milliseconds
-     * @return true if started successfully
-     */
-	bool fadeToPercentChan(uint8_t channel_idx, DutyCycle target_pct, uint32_t fade_time_ms);
-
-	/** Returns true while a hardware fade is in progress on the given channel */
-	bool isFadingChan(uint8_t channel_idx) const;
 
 private:
 	struct PinConfig {
