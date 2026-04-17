@@ -267,24 +267,24 @@ be changed per-channel at runtime before the queue is filled.
 | Mode | Behaviour | Auto-start |
 |------|-----------|------------|
 | `FIFO` (default) | Entries play once in order; `onQueueEmpty` fires when exhausted | Yes — playback starts on first `queueFadeChan()` call |
-| `CYCLIC` | Entries loop endlessly back to entry 0; `onCyclicWrap` fires each loop | No — call `startFadeQueue()` after seeding all entries |
+| `CYCLIC` | Entries loop endlessly back to entry 0; `onCyclicWrap` fires each loop | No — call `startQueue()` after seeding all entries |
 
 ##### Queue management
 
 ```cpp
-void    setFadeQueueMode(uint8_t channel, FadeQueueMode mode);  // FIFO or CYCLIC
-FadeQueueMode getFadeQueueMode(uint8_t channel) const;
+void    setQueueMode(uint8_t channel, QueueMode mode);  // FIFO or CYCLIC
+QueueMode getQueueMode(uint8_t channel) const;
 
-// Override the auto-start default set by setFadeQueueMode()
-void setFadeQueueAutoStart(uint8_t channel, bool autoStart);
-bool getFadeQueueAutoStart(uint8_t channel) const;
+// Override the auto-start default set by setQueueMode()
+void setQueueAutoStart(uint8_t channel, bool autoStart);
+bool getQueueAutoStart(uint8_t channel) const;
 
 // Change queue depth (only while queue is empty; default FADE_QUEUE_DEPTH = 10)
-bool     setFadeQueueCapacity(uint8_t channel, uint16_t depth);
-uint16_t getFadeQueueCapacity(uint8_t channel) const;
+bool     setQueueCapacity(uint8_t channel, uint16_t depth);
+uint16_t getQueueCapacity(uint8_t channel) const;
 
-uint16_t getFadeQueueCount(uint8_t channel) const;  // entries currently queued
-void     resetFadeQueue(uint8_t channel);            // clear queue, preserve capacity
+uint16_t getQueueEntries(uint8_t channel) const;  // entries currently queued
+void     resetQueue(uint8_t channel);            // clear queue, preserve capacity
 ```
 
 ##### Enqueueing and starting
@@ -295,7 +295,7 @@ bool queueFadeChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs);
 bool queueFadePercentChan(uint8_t channel, float targetPct, uint32_t fadeTimeMs);
 
 // Explicitly start a CYCLIC queue (or restart an idle FIFO queue)
-bool startFadeQueue(uint8_t channel);
+bool startQueue(uint8_t channel);
 ```
 
 ##### Callbacks
@@ -314,11 +314,11 @@ pwm.setOnCyclicWrapCallback([](uint8_t ch) { ... });
 ##### Example — CYCLIC queue
 
 ```cpp
-pwm.setFadeQueueMode(1, Esp32HardwarePwm::FadeQueueMode::CYCLIC);
+pwm.setQueueMode(1, Esp32HardwarePwm::QueueMode::CYCLIC);
 pwm.queueFadePercentChan(1, 100.0f, 1000);
 pwm.queueFadePercentChan(1,   0.0f, 1000);
 pwm.queueFadePercentChan(1,  50.0f, 1000);
-pwm.startFadeQueue(1);  // must be called after seeding; CYCLIC does not auto-start
+pwm.startQueue(1);  // must be called after seeding; CYCLIC does not auto-start
 ```
 
 See `samples/FadeQueue_HwPWM` for a complete demonstration of both modes.

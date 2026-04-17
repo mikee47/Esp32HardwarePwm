@@ -10,7 +10,7 @@
  *
  *   Channel 1 — CYCLIC mode
  *     Three entries loop forever.  onCyclicWrap fires on each full cycle.
- *     After three complete cycles resetFadeQueue() stops the channel.
+ *     After three complete cycles resetQueue() stops the channel.
  *
  *   onFadeDone fires after every individual fade on any channel.
  */
@@ -57,7 +57,7 @@ void setupFadeQueueDemo()
 	pwm.setOnFadeDoneCallback([](uint8_t ch) {
 		Serial << _F("onFadeDone   ch=") << ch
 		       << _F("  duty=") << pwm.getDutyChan(ch)
-		       << _F("  queued=") << pwm.getFadeQueueCount(ch) << endl;
+		       << _F("  queued=") << pwm.getQueueEntries(ch) << endl;
 	});
 
 	// ------------------------------------------------------------------
@@ -79,7 +79,7 @@ void setupFadeQueueDemo()
 		if(cyclicWrapCount >= MAX_CYCLIC_LOOPS) {
 			Serial << _F("Reached ") << MAX_CYCLIC_LOOPS
 			       << _F(" loops — stopping channel ") << ch << endl;
-			pwm.resetFadeQueue(ch);
+			pwm.resetQueue(ch);
 		}
 	});
 
@@ -87,7 +87,8 @@ void setupFadeQueueDemo()
 	// Channel 0: FIFO — 3 fades pre-loaded, then channel goes idle
 	// ------------------------------------------------------------------
 	Serial.println(_F("Channel 0: FIFO — queuing 3 fades (100%->0%->50%->0%->100%->50%)"));
-	// Mode defaults to FIFO; no setFadeQueueMode call needed
+	// Mode defaults to FIFO; no setQueueMode call needed
+    pwm.setQueueCapacity(0,25);
 	pwm.queueFadePercentChan(0, 100.0f, FADE_MS/5);
 	pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);
 	pwm.queueFadePercentChan(0,  50.0f, FADE_MS/2);
@@ -112,19 +113,20 @@ void setupFadeQueueDemo()
     pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);
     pwm.queueFadePercentChan(0, 100.0f, FADE_MS/5);
     pwm.queueFadePercentChan(0,  50.0f, FADE_MS);
+    pwm.queueFadePercentChan(0,0.0f, 5000);
 	// ------------------------------------------------------------------
-	// Channel 1: CYCLIC — 3 entries loop until resetFadeQueue() is called
+	// Channel 1: CYCLIC — 3 entries loop until resetQueue() is called
 	// ------------------------------------------------------------------
 	Serial.println(_F("Channel 1: CYCLIC — 3-entry loop (0%→100%→0%→50%…)"));
-	pwm.setFadeQueueMode(1, Esp32HardwarePwm::FadeQueueMode::CYCLIC);
+	pwm.setQueueMode(1, Esp32HardwarePwm::QueueMode::CYCLIC);
 	// Demonstrate runtime-configurable queue depth (4 slots instead of default 10)
-	pwm.setFadeQueueCapacity(1, 4);
+	pwm.setQueueCapacity(1, 4);
 	pwm.queueFadePercentChan(1, 100.0f, FADE_MS);
 	pwm.queueFadePercentChan(1,   0.0f, FADE_MS);
 	pwm.queueFadePercentChan(1,  50.0f, FADE_MS);
 	pwm.queueFadePercentChan(1,   0.0f, FADE_MS);
 	// All entries seeded — now start the cycle explicitly
-	pwm.startFadeQueue(1);
+	pwm.startQueue(1);
 }
 
 } // namespace

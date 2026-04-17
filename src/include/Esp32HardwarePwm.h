@@ -79,7 +79,7 @@ public:
 	// Fade queue types
 	// -----------------------------------------------------------------------
 
-	enum class FadeQueueMode : uint8_t {
+	enum class QueueMode : uint8_t {
 		FIFO,   ///< Queue drains and stops; onQueueEmpty fires when exhausted
 		CYCLIC, ///< Playback loops back to entry 0 endlessly; onCyclicWrap fires on each loop
 	};
@@ -324,15 +324,15 @@ public:
 	 * Must be called before filling the queue. Changing mode while the queue
 	 * is running has undefined behaviour.
 	 */
-	void setFadeQueueMode(uint8_t channel, FadeQueueMode mode);
+	void setQueueMode(uint8_t channel, QueueMode mode);
 
 	/** @brief Get current queue mode for a channel */
-	FadeQueueMode getFadeQueueMode(uint8_t channel) const;
+	QueueMode getQueueMode(uint8_t channel) const;
 
 	/** @brief Enqueue a fade on a channel (absolute duty target).
 	 * For FIFO queues (autoStart=true, the default), playback starts automatically
 	 * on the first entry when the channel is idle.  For CYCLIC queues
-	 * (autoStart=false by default), call startFadeQueue() after seeding all entries.
+	 * (autoStart=false by default), call startQueue() after seeding all entries.
 	 * Returns false if the queue is full.
 	 */
 	bool queueFadeChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs);
@@ -348,14 +348,14 @@ public:
 	}
 
 	/** @brief Return number of entries currently in the queue for a channel */
-	uint16_t getFadeQueueCount(uint8_t channel) const;
+	uint16_t getQueueEntries(uint8_t channel) const;
 
 	/** @brief Clear the queue for a channel and reset mode to FIFO.
 	 * The currently-running hardware fade (if any) completes normally, but no
 	 * further queue entries are started and no callbacks fire afterwards.
 	 * Queue capacity is preserved.
 	 */
-	void resetFadeQueue(uint8_t channel);
+	void resetQueue(uint8_t channel);
 
 	/** @brief Explicitly start a queued sequence.
 	 * Must be called after seeding a CYCLIC queue (autoStart=false).  For FIFO
@@ -363,25 +363,25 @@ public:
 	 * to restart an idle queue.  Returns false if the queue is empty or the
 	 * channel is already fading.
 	 */
-	bool startFadeQueue(uint8_t channel);
+	bool startQueue(uint8_t channel);
 
 	/** @brief Set the maximum number of entries for a channel's queue.
 	 * Can only be changed while the queue is empty.  Returns false if the
 	 * queue is not empty or depth is zero.
 	 */
-	bool setFadeQueueCapacity(uint8_t channel, uint16_t depth);
+	bool setQueueCapacity(uint8_t channel, uint16_t depth);
 
 	/** @brief Get the maximum number of entries for a channel's queue */
-	uint16_t getFadeQueueCapacity(uint8_t channel) const;
+	uint16_t getQueueCapacity(uint8_t channel) const;
 
 	/** @brief Override the auto-start behaviour for a channel's queue.
-	 * setFadeQueueMode() sets autoStart automatically (true for FIFO, false
+	 * setQueueMode() sets autoStart automatically (true for FIFO, false
 	 * for CYCLIC).  Use this to override that default.
 	 */
-	void setFadeQueueAutoStart(uint8_t channel, bool autoStart);
+	void setQueueAutoStart(uint8_t channel, bool autoStart);
 
 	/** @brief Returns true if the queue starts automatically on first queueFadeChan() call */
-	bool getFadeQueueAutoStart(uint8_t channel) const;
+	bool getQueueAutoStart(uint8_t channel) const;
 
 	/** @brief Callback fired after every individual fade completes (even if more are queued) */
 	void setOnFadeDoneCallback(Delegate<void(uint8_t)> cb)
@@ -470,8 +470,8 @@ private:
 		uint16_t tail = 0;		 ///< Next free write slot
 		uint16_t count = 0;		 ///< FIFO: decrements on pop; CYCLIC: fixed after seeding
 		uint16_t cycleLen = 0;	 ///< CYCLIC: number of entries in the cycle
-		FadeQueueMode mode = FadeQueueMode::FIFO;
-		bool autoStart = true;	 ///< If true, playback starts on first queueFadeChan(); false requires startFadeQueue()
+		QueueMode mode = QueueMode::FIFO;
+		bool autoStart = true;	 ///< If true, playback starts on first queueFadeChan(); false requires startQueue()
 	};
 
 	struct PinConfig {

@@ -592,7 +592,7 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 
 	ChannelFadeQueue& q = fadeQueues_[channel_idx];
 
-	if(q.mode == FadeQueueMode::FIFO) {
+	if(q.mode == QueueMode::FIFO) {
 		if(q.count == 0)
 			return false;
 		FadeEntry entry = dequeueFifo(q);
@@ -610,31 +610,31 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 	}
 }
 
-void Esp32HardwarePwm::setFadeQueueMode(uint8_t channel, FadeQueueMode mode)
+void Esp32HardwarePwm::setQueueMode(uint8_t channel, QueueMode mode)
 {
 	if(channel >= pins_.size())
 		return;
 	fadeQueues_[channel].mode = mode;
-	// FIFO auto-starts on first entry; CYCLIC waits for an explicit startFadeQueue() call
-	fadeQueues_[channel].autoStart = (mode == FadeQueueMode::FIFO);
+	// FIFO auto-starts on first entry; CYCLIC waits for an explicit startQueue() call
+	fadeQueues_[channel].autoStart = (mode == QueueMode::FIFO);
 }
 
-Esp32HardwarePwm::FadeQueueMode Esp32HardwarePwm::getFadeQueueMode(uint8_t channel) const
+Esp32HardwarePwm::QueueMode Esp32HardwarePwm::getQueueMode(uint8_t channel) const
 {
 	if(channel >= pins_.size())
-		return FadeQueueMode::FIFO;
+		return QueueMode::FIFO;
 	return fadeQueues_[channel].mode;
 }
 
-uint16_t Esp32HardwarePwm::getFadeQueueCount(uint8_t channel) const
+uint16_t Esp32HardwarePwm::getQueueEntries(uint8_t channel) const
 {
 	if(channel >= pins_.size())
 		return 0;
 	const ChannelFadeQueue& q = fadeQueues_[channel];
-	return (q.mode == FadeQueueMode::FIFO) ? q.count : q.cycleLen;
+	return (q.mode == QueueMode::FIFO) ? q.count : q.cycleLen;
 }
 
-void Esp32HardwarePwm::resetFadeQueue(uint8_t channel)
+void Esp32HardwarePwm::resetQueue(uint8_t channel)
 {
 	if(channel >= pins_.size())
 		return;
@@ -643,21 +643,21 @@ void Esp32HardwarePwm::resetFadeQueue(uint8_t channel)
 	fadeQueues_[channel].entries.resize(cap);
 }
 
-bool Esp32HardwarePwm::startFadeQueue(uint8_t channel)
+bool Esp32HardwarePwm::startQueue(uint8_t channel)
 {
 	if(!initialized_ || !fadeInstalled_ || channel >= pins_.size())
 		return false;
 	if(isFadingChan(channel))
 		return false;
 	const ChannelFadeQueue& q = fadeQueues_[channel];
-	if(q.mode == FadeQueueMode::FIFO && q.count == 0)
+	if(q.mode == QueueMode::FIFO && q.count == 0)
 		return false;
-	if(q.mode == FadeQueueMode::CYCLIC && q.cycleLen == 0)
+	if(q.mode == QueueMode::CYCLIC && q.cycleLen == 0)
 		return false;
 	return startNextFade(channel);
 }
 
-bool Esp32HardwarePwm::setFadeQueueCapacity(uint8_t channel, uint16_t depth)
+bool Esp32HardwarePwm::setQueueCapacity(uint8_t channel, uint16_t depth)
 {
 	if(channel >= pins_.size() || depth == 0)
 		return false;
@@ -668,21 +668,21 @@ bool Esp32HardwarePwm::setFadeQueueCapacity(uint8_t channel, uint16_t depth)
 	return true;
 }
 
-uint16_t Esp32HardwarePwm::getFadeQueueCapacity(uint8_t channel) const
+uint16_t Esp32HardwarePwm::getQueueCapacity(uint8_t channel) const
 {
 	if(channel >= pins_.size())
 		return 0;
 	return (uint16_t)fadeQueues_[channel].entries.size();
 }
 
-void Esp32HardwarePwm::setFadeQueueAutoStart(uint8_t channel, bool autoStart)
+void Esp32HardwarePwm::setQueueAutoStart(uint8_t channel, bool autoStart)
 {
 	if(channel >= pins_.size())
 		return;
 	fadeQueues_[channel].autoStart = autoStart;
 }
 
-bool Esp32HardwarePwm::getFadeQueueAutoStart(uint8_t channel) const
+bool Esp32HardwarePwm::getQueueAutoStart(uint8_t channel) const
 {
 	if(channel >= pins_.size())
 		return true;
@@ -697,7 +697,7 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 	}
 
 	ChannelFadeQueue& q = fadeQueues_[channel];
-	uint16_t capacity = (q.mode == FadeQueueMode::FIFO) ? q.count : q.cycleLen;
+	uint16_t capacity = (q.mode == QueueMode::FIFO) ? q.count : q.cycleLen;
 
 	if(capacity >= (uint16_t)q.entries.size()) {
 		debug_e("queueFadeChan: channel %d queue full (%d entries)", channel, capacity);
@@ -710,7 +710,7 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 	q.entries[q.tail] = {targetDuty, fadeTimeMs};
 	q.tail = (q.tail + 1) % (uint16_t)q.entries.size();
 
-	if(q.mode == FadeQueueMode::FIFO)
+	if(q.mode == QueueMode::FIFO)
 		++q.count;
 	else
 		++q.cycleLen;

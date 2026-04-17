@@ -6,14 +6,14 @@ Demonstrates the per-channel fade queue API of ``Esp32HardwarePwm``.
 Two queue modes are shown side by side:
 
 Channel 0 — **FIFO mode** (default)
-    Three fades are pre-loaded before the channel starts.  The library
+    Fades are pre-loaded before the channel starts.  The library
     chains them automatically without application involvement.  When the
     last entry completes the ``onQueueEmpty`` callback fires.
 
 Channel 1 — **CYCLIC mode**
     Three entries are seeded.  When the last entry finishes playback wraps
     back to entry 0 and continues indefinitely.  ``onCyclicWrap`` fires on
-    each loop.  ``resetFadeQueue`` is called after three full cycles to stop
+    each loop.  ``resetQueue`` is called after three full cycles to stop
     the channel.
 
 Common callback
