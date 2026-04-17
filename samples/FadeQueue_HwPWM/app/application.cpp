@@ -42,7 +42,7 @@ constexpr uint32_t FADE_MS = 1600; ///< Duration of each individual fade step
 
 // Track how many complete CYCLIC loops have fired on channel 1
 uint8_t cyclicWrapCount = 0;
-constexpr uint8_t MAX_CYCLIC_LOOPS = 3; ///< Stop channel 1 after this many loops
+constexpr uint8_t MAX_CYCLIC_LOOPS = 7; ///< Stop channel 1 after this many loops
 
 void setupFadeQueueDemo()
 {
@@ -89,6 +89,24 @@ void setupFadeQueueDemo()
 	Serial.println(_F("Channel 0: FIFO — queuing 3 fades (100%->0%->50%->0%->100%->50%)"));
 	// Mode defaults to FIFO; no setFadeQueueMode call needed
 	pwm.queueFadePercentChan(0, 100.0f, FADE_MS/5);
+	pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);
+	pwm.queueFadePercentChan(0,  50.0f, FADE_MS/2);
+    pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);
+    pwm.queueFadePercentChan(0, 100.0f, FADE_MS/5);
+    pwm.queueFadePercentChan(0,  50.0f, FADE_MS);
+    pwm.queueFadePercentChan(0, 100.0f, FADE_MS/5);
+	pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);
+	pwm.queueFadePercentChan(0,  50.0f, FADE_MS/2);
+    pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);
+    pwm.queueFadePercentChan(0, 100.0f, FADE_MS/5);
+    pwm.queueFadePercentChan(0,  50.0f, FADE_MS);
+    pwm.queueFadePercentChan(0, 100.0f, FADE_MS/5);
+	pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);
+	pwm.queueFadePercentChan(0,  50.0f, FADE_MS/2);
+    pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);
+    pwm.queueFadePercentChan(0, 100.0f, FADE_MS/5);
+    pwm.queueFadePercentChan(0,  50.0f, FADE_MS);
+    pwm.queueFadePercentChan(0, 100.0f, FADE_MS/5);
 	pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);
 	pwm.queueFadePercentChan(0,  50.0f, FADE_MS/2);
     pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);

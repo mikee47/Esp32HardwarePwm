@@ -21,7 +21,7 @@ namespace
 // If you move LED_PIN to a different position in pinList, update LED_CHANNEL accordingly.
 #define LED_CHANNEL 0
 
-std::vector<uint8_t> pinList{LED_PIN, 4, 5, 18, 19};
+std::vector<uint8_t> pinList{13, 12, 14, 27, 26};
 
 // Default duty percentages, one per channel
 const Esp32HardwarePwm::DutyCycle defaultDutyPercent[]{50.0f, 95.0f, 50.0f, 85.0f, 10.0f};
