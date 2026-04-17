@@ -7,7 +7,9 @@ A comprehensive C++ wrapper for the ESP32 LEDC PWM functionality, designed for t
 - **Multiple PWM Instances**: Create multiple independent PWM instances with different configurations
 - **Flexible Configuration**: Support for different frequencies, duty resolutions (1-20 bits), and speed modes
 - **Phase Shifting**: Built-in support for phase shifting to reduce EMI
-- (todo) **Hardware Fade**: Hardware-accelerated fade transitions
+- **Spread Spectrum**: Optional spread-spectrum modulation of the base frequency to further reduce EMI
+- **Hardware Fade**: Hardware-accelerated linear fade transitions via the ESP32 LEDC fade engine
+- **Fade Queue**: Per-channel FIFO and CYCLIC fade queues with completion callbacks
 
 ## ESP32 LEDC Hardware Overview
 ```
@@ -97,7 +99,7 @@ A comprehensive C++ wrapper for the ESP32 LEDC PWM functionality, designed for t
 
 ```cpp
 #include <SmingCore.h>
-#include "Esp32HardwarePwm.h"
+#include <Esp32HardwarePwm.h>
 
 // Define pins for PWM output
 std::vector<uint8_t> pwm_pins = {2, 4, 5, 18};
@@ -105,14 +107,13 @@ std::vector<uint8_t> pwm_pins = {2, 4, 5, 18};
 void init() {
     Serial.begin(SERIAL_BAUD_RATE);
 
-    // Create PWM instance with default settings
+    // Create PWM instance with default settings (10-bit, 1 kHz)
     Esp32HardwarePwm pwm(pwm_pins);
 
     if (pwm.isInitialized()) {
-        // Set different duty cycles
-        pwm.setDutyChanPercent(0, 25.0f);   // 25% duty cycle on channel 0
-        pwm.setDutyChan(1, 512);            // Duty cycle on channel 1
-        pwm.analogWrite(2, 768);            // Duty cycle on channel 2
+        pwm.setDutyChan(0, 256);              // raw duty on channel 0 (25 % of 1023)
+        pwm.setDutyChan(1, 512);              // 50 % on channel 1
+        pwm.analogWrite(pwm_pins[2], 768);    // legacy pin-indexed write
 
         Serial.println("PWM initialized successfully");
     } else {
@@ -124,133 +125,92 @@ void init() {
 ### Advanced Configuration
 
 ```cpp
-#include "Esp32HardwarePwm.h"
+#include <SmingCore.h>
+#include <Esp32HardwarePwm.h>
 
-void advancedPwmExample() {
-    std::vector<uint8_t> led_pins = {12, 13, 14};
+std::vector<uint8_t> led_pins = {12, 13, 14};
 
-    Esp32HwPwmConfig config;
-    config.frequency = 20000;                    // 20kHz
-    config.resolution = LEDC_TIMER_12_BIT;       // 12-bit resolution
-    config.speed_mode = LEDC_LOW_SPEED_MODE;     // Low speed mode
-    config.phaseShift.mode = PhaseShiftMode::AUTO; // Enable phase shifting
-    config.spreadSpectrum.mode = SpreadSpectrumMode::OFF; // No spread spectrum
+Esp32HardwarePwm pwm(led_pins, Esp32HardwarePwm::Config{
+    .timer = {
+        .resolution = LEDC_TIMER_12_BIT,  // 12-bit (0-4095)
+        .frequency  = 20000,              // 20 kHz
+    },
+    .phaseShift = {
+        .mode = Esp32HardwarePwm::PhaseShiftMode::AUTO,
+    },
+});
 
-    Esp32HardwarePwm pwm(led_pins, config);
-
+void init() {
     if (pwm.isInitialized()) {
-        pwm.enableFade();
-
-        pwm.fadeToPercent(0, 100.0f, 2000);   // Fade to 100% over 2 seconds
-        pwm.fadeToPercent(1, 50.0f, 1500);    // Fade to 50% over 1.5 seconds
-        pwm.fadeToValue(2, 2048, 1000, true); // Fade to value over 1 second, wait for completion
+        pwm.fadeToValueChan(0, pwm.getMaxDuty(), 2000);  // fade to 100% over 2 s
+        pwm.fadeToPercentChan(1, 50.0f, 1500);           // fade to 50% over 1.5 s
     }
 }
 ```
 
 ## API Reference
 
-### Configuration Structures
+### Configuration
+
+All configuration is passed through the nested `Esp32HardwarePwm::Config` aggregate:
 
 ```cpp
-struct Esp32HwPwmTimerConfig {
-    ledc_mode_t speed_mode;
-    ledc_timer_bit_t resolution;
-    ledc_timer_t timer_num;
-    uint32_t frequency;
-    ledc_clk_cfg_t clk_cfg;
+struct Esp32HardwarePwm::Config {
+    ledc_channel_t channelStart = LEDC_CHANNEL_0;  // first LEDC channel to allocate
+    TimerConfig        timer          = {};         // frequency, resolution, timer index
+    PhaseShiftConfig   phaseShift     = {};         // OFF / AUTO / MANUAL
+    SpreadSpectrumConfig spreadSpectrum = {};       // OFF / ON
 };
 
-struct Esp32HwPwmSpreadSpectrumConfig {
-    SpreadSpectrumMode mode;
-    int WidthPercent;
-    int Subsampling;
+struct TimerConfig {
+    ledc_mode_t      speed_mode  = LEDC_LOW_SPEED_MODE;
+    ledc_timer_bit_t resolution  = LEDC_TIMER_10_BIT;  // 1-20 bits
+    ledc_timer_t     timer_num   = LEDC_TIMER_0;
+    uint32_t         frequency   = 1000;               // Hz
+    ledc_clk_cfg_t   clk_cfg     = LEDC_AUTO_CLK;
 };
 
-struct Esp32HwPwmPhaseShiftConfig {
-    PhaseShiftMode mode;
-    std::vector<uint32_t> manual_hpoints;
+struct PhaseShiftConfig {
+    PhaseShiftMode      mode            = PhaseShiftMode::OFF;
+    std::vector<int>    manual_hpoints  = {};  // one per pin, MANUAL mode only
+};
+
+struct SpreadSpectrumConfig {
+    SpreadSpectrumMode mode         = SpreadSpectrumMode::OFF;
+    uint8_t            WidthPercent = 0;   // deviation as % of base frequency
+    uint16_t           Subsampling  = 0;   // PWM cycles between updates
 };
 ```
 
 ### Main Class: Esp32HardwarePwm
 
 #### Constructors
-At it's most basic, the Esp32 pwm can be instantiated using just the pins array. In this case, it will 
-behave much like the original HardwarePWM implementation in Sming, with the minor difference that inctead
-of a C style array, the constructor teakes a std::vector (todo: should there be an overload with a C array?)
-the `Esp32HwPwmConfig` structure comes with additional settings to configure
-phase shift, the timer and spread spectrum settings.
-*Caution:* this library does not provide internal resource allocation. If you don't provide a `Esp32HwPwmConfig` structure,
-all resource allocations will be as per default, specifically, for the timer, those are
-- `timer.speed_mode` = `LEDC_LOW_SPEED_MODE` - available on all Esp32 variants 
-- `timer.timer_num`  = `LEDC_TIMER_0` - the first timer in the system
-- `timer.resolution` = `LEDC_TIMER_10_BIT` - a 10 Bit timer (max duty=1023)
-- `timer.frequency`  = 1000 - 1kHz
-- `timer.clk_cfg`    = `LEDC_AUTO_CLK`
 
-those are all timer specific settings and are generally a good base setting. If you want more than one `Esp32HardwarePwm` instance in 
-your code, you *can* use the same timer settings - meaning both instances will share the same timer - no problem there, but they will
-share the same settings and if you change the timer settings in one (such as the frequency) that will also change for the other.
-
-If you are using multiple instances, you will at least have to set the `channelStart` value on the 2nd instance, since otherwise, it 
-will be set to `LEDC_CHANNEL_0`, overwriting the channel config in your first instance. 
-
-On an embedded platform, it seems reasonable to leave full control over the hardware allocation to the developer rather than automatically
-allocate timers and channels from a pool, but this may be a pitfall
-.
-So: if you use more than one pwm object, make sure that you instantiate the 2nd one with a minimal `Esp23HwPwmConfig.channelStart` set to
-the first free channel on your system.
-
-Also be aware that the `timer.speed_mode` devides that channel groups in two and one `Esp32HardwarePwm` instance cannot overlap between the two.
-If you have one instance using five channels and you want to create a 2nd instance with four channels on the same `timer.speed_mode` you will get a runtime error, since the maximum amount of channels is 8 per speed mode (depending on the SoC, only the Esp32 has high speed timers, and the Esp32c3, as an example, has only six channels and a low speed timer).
-As said: channel allocation is left to the developer!
-
-##### Phase Shift
-when building a high power driver for LEDs or a motor, it might be desireable to not have all channels switch on at the exact same time. Phase shifting helps by allowing the developer to set a per-channel delay within the pwm period.
-The easiest way is to set `Esp32HwPwmConfig.phaseShift.mode = PhaseShiftMode::AUTO` which will make sure that the phases are equally staggered across the pwm period.
-
-You can also set `Esp32HwPwmConfig.phaseShift.mode = PhaseShiftMode::MANUAL` in wich case you have to provide a `std::vector` of size pins of int values between 0 and pwm period as `Esp32HwPwmConfig.phaseShift.manual_hpoints` - those will then be used as the hpoints for your signals. This way, you could, as an example, stagger them by 10% of your perio, starting channel 0 at t=0, channel 1 at t=10%, channel 2 at 20% etc. You will have to calculate those hpoint values manually for any given pwm frequency / period.
-
-It is generally suggested to leave phaseShift `OFF` in low current uses and `AUTO` where the switchim impact on the power lines is significant or EMI is a consideration.
-
-##### Spread Spectrum
-Spread Spectrum spreads the pwm base frequency around the center frequency to reduce EMI
+At its most basic the constructor only needs a pin list; all other settings default to 10-bit / 1 kHz / `LEDC_TIMER_0` / low-speed mode.
 
 ```cpp
 Esp32HardwarePwm(std::vector<uint8_t>& pins);
-Esp32HardwarePwm(std::vector<uint8_t>& pins, const Esp32HwPwmConfig& config);
+Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& config);
 ```
 
-#### Destructor
-```cpp
-virtual ~Esp32HardwarePwm();
-```
+> **Multiple instances**: each instance must use a distinct set of LEDC channels.  Set `config.channelStart` on the second instance to the first free channel (e.g. `LEDC_CHANNEL_3` if the first instance uses three channels).  Instances that share the same `timer_num` also share the same frequency and resolution — changing one affects the other.
 
 #### Duty Cycle Control
-The library includes two different ways to access a pwm channel - by `pin` or `channel`.
-The per pin interface seems a bit more straight forward for makers who come from the hardware side
-while the per channel interface is the native interface for the ledc_ api. 
 
+Channels are zero-indexed in the order the pins were supplied to the constructor.
 
-#####per channel interface
+##### Channel interface (preferred)
 ```cpp
+bool     setDutyChan(uint8_t channel, uint32_t duty, bool update_immediately = true);
 uint32_t getDutyChan(uint8_t channel);
-bool setDutyChan(uint8_t channel, uint32_t duty, bool update_immediately = true);
-bool setDutyChanPercent(uint8_t channel, float percentage, bool update_immediately = true);
-float getDutyChanPercent(uint8_t channel);
+bool     setPhaseShiftChan(uint8_t channel, uint32_t phase_shift, bool update_immediately = true);
 ```
 
-#####per pin interface
+##### Pin interface (legacy)
 ```cpp
-bool setDuty(uint8_t pin, uint32_t duty, bool update_immediately = true);
+bool     setDuty(uint8_t pin, uint32_t duty, bool update_immediately = true);
 uint32_t getDuty(uint8_t pin);
-bool analogWrite(uint8_t pin, uint32_t duty);
-```
-
-#### Phase Shift Control
-```cpp
-bool setPhaseShiftChan(uint8_t pin, uint32_t phase_shift, bool update_immediately = true);
+bool     analogWrite(uint8_t pin, uint32_t duty);
 ```
 
 #### Frequency and Period Control
@@ -281,12 +241,87 @@ void stopAll(uint8_t idle_level = 0);
 ```
 
 #### Hardware Fade
+
+Fade support is installed automatically on first use.
+
 ```cpp
-bool enableFade();
+bool enableFade();    // install LEDC fade ISR (called automatically by fade methods)
 void disableFade();
-bool fadeToValue(uint8_t pin, uint32_t target_duty, uint32_t fade_time_ms, bool wait_for_completion = false);
-bool fadeToPercent(uint8_t pin, float target_percent, uint32_t fade_time_ms, bool wait_for_completion = false);
+
+// Fade to an absolute duty value
+bool fadeToValueChan(uint8_t channel, uint32_t target_duty, uint32_t fade_time_ms);
+// Fade to a percentage (0.0 – 100.0)
+bool fadeToPercentChan(uint8_t channel, float target_pct, uint32_t fade_time_ms);
+// Returns true while a hardware fade is in progress
+bool isFadingChan(uint8_t channel) const;
 ```
+
+#### Fade Queue
+
+Each channel has an independent fade queue that can chain multiple fades without
+application polling.  The queue depth defaults to `FADE_QUEUE_DEPTH` (10) and can
+be changed per-channel at runtime before the queue is filled.
+
+##### Modes
+
+| Mode | Behaviour | Auto-start |
+|------|-----------|------------|
+| `FIFO` (default) | Entries play once in order; `onQueueEmpty` fires when exhausted | Yes — playback starts on first `queueFadeChan()` call |
+| `CYCLIC` | Entries loop endlessly back to entry 0; `onCyclicWrap` fires each loop | No — call `startQueue()` after seeding all entries |
+
+##### Queue management
+
+```cpp
+void    setQueueMode(uint8_t channel, QueueMode mode);  // FIFO or CYCLIC
+QueueMode getQueueMode(uint8_t channel) const;
+
+// Override the auto-start default set by setQueueMode()
+void setQueueAutoStart(uint8_t channel, bool autoStart);
+bool getQueueAutoStart(uint8_t channel) const;
+
+// Change queue depth (only while queue is empty; default FADE_QUEUE_DEPTH = 10)
+bool     setQueueCapacity(uint8_t channel, uint16_t depth);
+uint16_t getQueueCapacity(uint8_t channel) const;
+
+uint16_t getQueueEntries(uint8_t channel) const;  // entries currently queued
+void     resetQueue(uint8_t channel);            // clear queue, preserve capacity
+```
+
+##### Enqueueing and starting
+
+```cpp
+// Enqueue a fade (absolute duty or percentage)
+bool queueFadeChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs);
+bool queueFadePercentChan(uint8_t channel, float targetPct, uint32_t fadeTimeMs);
+
+// Explicitly start a CYCLIC queue (or restart an idle FIFO queue)
+bool startQueue(uint8_t channel);
+```
+
+##### Callbacks
+
+```cpp
+// Fires after every individual fade completes (any mode)
+pwm.setOnFadeDoneCallback([](uint8_t ch) { ... });
+
+// Fires when a FIFO queue drains to empty
+pwm.setOnQueueEmptyCallback([](uint8_t ch) { ... });
+
+// Fires each time a CYCLIC queue wraps back to entry 0
+pwm.setOnCyclicWrapCallback([](uint8_t ch) { ... });
+```
+
+##### Example — CYCLIC queue
+
+```cpp
+pwm.setQueueMode(1, Esp32HardwarePwm::QueueMode::CYCLIC);
+pwm.queueFadePercentChan(1, 100.0f, 1000);
+pwm.queueFadePercentChan(1,   0.0f, 1000);
+pwm.queueFadePercentChan(1,  50.0f, 1000);
+pwm.startQueue(1);  // must be called after seeding; CYCLIC does not auto-start
+```
+
+See `samples/FadeQueue_HwPWM` for a complete demonstration of both modes.
 
 ## License
 

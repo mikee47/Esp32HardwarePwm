@@ -29,6 +29,27 @@
 #include <soc/soc_caps.h>
 #include <array>
 #include <esp_attr.h>
+#include <Delegate.h>
+
+// ---------------------------------------------------------------------------
+// Per-channel fade queue depth — override before including this header.
+// ---------------------------------------------------------------------------
+#ifndef FADE_QUEUE_DEPTH
+#define FADE_QUEUE_DEPTH 10
+#endif
+
+// ---------------------------------------------------------------------------
+// Debug level control for Esp32HardwarePwm
+// Define HW_PWM_DEBUG before including this header or via compiler flag.
+// Uses Sming's ENABLE_DEBUG mechanism (debug_progmem.h) in the .cpp file.
+//   0 = no logging
+//   1 = errors only   (debug_e)
+//   2 = errors + info (debug_e, debug_i)
+//   3 = full          (debug_e, debug_i, debug_d)
+// ---------------------------------------------------------------------------
+#ifndef ENABLE_DEBUG
+#define ENABLE_DEBUG 1
+#endif
 
 /**
  * @brief ESP32 Hardware PWM class
@@ -53,6 +74,15 @@ public:
      * @brief Defines PWM duty cycle percentage (0.0 = off, 100.0 = full on)
      */
 	using DutyCycle = float;
+
+	// -----------------------------------------------------------------------
+	// Fade queue types
+	// -----------------------------------------------------------------------
+
+	enum class QueueMode : uint8_t {
+		FIFO,   ///< Queue drains and stops; onQueueEmpty fires when exhausted
+		CYCLIC, ///< Playback loops back to entry 0 endlessly; onCyclicWrap fires on each loop
+	};
 
 	// -----------------------------------------------------------------------
 	// Configuration types — declared before constructors so they are visible
@@ -286,7 +316,91 @@ public:
 	/** @brief Returns true while a hardware fade is in progress on the given channel */
 	bool isFadingChan(uint8_t channel_idx) const;
 
-	
+	// -----------------------------------------------------------------------
+	// Fade queue interface
+	// -----------------------------------------------------------------------
+
+	/** @brief Set queue mode for a channel.
+	 * Must be called before filling the queue. Changing mode while the queue
+	 * is running has undefined behaviour.
+	 */
+	void setQueueMode(uint8_t channel, QueueMode mode);
+
+	/** @brief Get current queue mode for a channel */
+	QueueMode getQueueMode(uint8_t channel) const;
+
+	/** @brief Enqueue a fade on a channel (absolute duty target).
+	 * For FIFO queues (autoStart=true, the default), playback starts automatically
+	 * on the first entry when the channel is idle.  For CYCLIC queues
+	 * (autoStart=false by default), call startQueue() after seeding all entries.
+	 * Returns false if the queue is full.
+	 */
+	bool queueFadeChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs);
+
+	/** @brief Enqueue a fade on a channel (percentage target, 0.0–100.0) */
+	bool queueFadePercentChan(uint8_t channel, float targetPct, uint32_t fadeTimeMs)
+	{
+		if(targetPct < 0.0f)
+			targetPct = 0.0f;
+		if(targetPct > 100.0f)
+			targetPct = 100.0f;
+		return queueFadeChan(channel, static_cast<uint32_t>(targetPct / 100.0f * getMaxDuty()), fadeTimeMs);
+	}
+
+	/** @brief Return number of entries currently in the queue for a channel */
+	uint16_t getQueueEntries(uint8_t channel) const;
+
+	/** @brief Clear the queue for a channel and reset mode to FIFO.
+	 * The currently-running hardware fade (if any) completes normally, but no
+	 * further queue entries are started and no callbacks fire afterwards.
+	 * Queue capacity is preserved.
+	 */
+	void resetQueue(uint8_t channel);
+
+	/** @brief Explicitly start a queued sequence.
+	 * Must be called after seeding a CYCLIC queue (autoStart=false).  For FIFO
+	 * queues with autoStart=true this is normally not needed, but can be used
+	 * to restart an idle queue.  Returns false if the queue is empty or the
+	 * channel is already fading.
+	 */
+	bool startQueue(uint8_t channel);
+
+	/** @brief Set the maximum number of entries for a channel's queue.
+	 * Can only be changed while the queue is empty.  Returns false if the
+	 * queue is not empty or depth is zero.
+	 */
+	bool setQueueCapacity(uint8_t channel, uint16_t depth);
+
+	/** @brief Get the maximum number of entries for a channel's queue */
+	uint16_t getQueueCapacity(uint8_t channel) const;
+
+	/** @brief Override the auto-start behaviour for a channel's queue.
+	 * setQueueMode() sets autoStart automatically (true for FIFO, false
+	 * for CYCLIC).  Use this to override that default.
+	 */
+	void setQueueAutoStart(uint8_t channel, bool autoStart);
+
+	/** @brief Returns true if the queue starts automatically on first queueFadeChan() call */
+	bool getQueueAutoStart(uint8_t channel) const;
+
+	/** @brief Callback fired after every individual fade completes (even if more are queued) */
+	void setOnFadeDoneCallback(Delegate<void(uint8_t)> cb)
+	{
+		onFadeDone_ = cb;
+	}
+
+	/** @brief Callback fired when a FIFO queue drains to empty */
+	void setOnQueueEmptyCallback(Delegate<void(uint8_t)> cb)
+	{
+		onQueueEmpty_ = cb;
+	}
+
+	/** @brief Callback fired each time a CYCLIC queue wraps back to entry 0 */
+	void setOnCyclicWrapCallback(Delegate<void(uint8_t)> cb)
+	{
+		onCyclicWrap_ = cb;
+	}
+
 	// -----------------------------------------------------------------------
 	// Legacy interface — GPIO-pin-indexed (use channel interface for new code)
 	// -----------------------------------------------------------------------
@@ -344,10 +458,26 @@ public:
 	void startAll();
 
 private:
+	struct FadeEntry {
+		uint32_t targetDuty;
+		uint32_t fadeTimeMs;
+	};
+
+	struct ChannelFadeQueue {
+		std::vector<FadeEntry> entries; ///< Ring-buffer storage (size = queue capacity)
+		uint16_t head = 0;				///< Next entry to consume
+		uint16_t tail = 0;				///< Next free write slot
+		uint16_t count = 0;				///< FIFO: decrements on pop; CYCLIC: fixed after seeding
+		uint16_t cycleLen = 0;			///< CYCLIC: number of entries in the cycle
+		QueueMode mode = QueueMode::FIFO;
+		bool autoStart = true; ///< If true, playback starts on first queueFadeChan(); false requires startQueue()
+	};
+
 	struct PinConfig {
 		uint8_t gpioPin = 0;					 ///< GPIO pin number
 		ledc_channel_t channel = LEDC_CHANNEL_0; ///< LEDC hardware channel
 		uint32_t currentDuty = 0;				 ///< Last duty value written
+		uint32_t targetDuty = 0;				 ///< Target duty for in-progress fade
 		int hpoint = 0;							 ///< Phase shift hpoint
 		bool isActive = false;					 ///< True when channel is running
 	};
@@ -356,12 +486,22 @@ private:
 	SpreadSpectrumConfig spreadSpectrum_;
 	PhaseShiftConfig phaseShift_;
 	std::vector<PinConfig> pins_;
+	std::vector<ChannelFadeQueue> fadeQueues_;
 
 	bool initialized_ = false;
 	bool fadeInstalled_ = false;
 
 	// Per-channel fade-done flags, set from LEDC fade callback (ISR-safe)
 	std::array<volatile bool, SOC_LEDC_CHANNEL_NUM> fadeDone_{};
+
+	// ISR → task handoff for fade completion
+	volatile uint32_t pendingFadeCallbacks_ = 0;
+	volatile bool fadeCallbackQueued_ = false;
+
+	// Application-level callbacks
+	Delegate<void(uint8_t)> onFadeDone_;
+	Delegate<void(uint8_t)> onQueueEmpty_;
+	Delegate<void(uint8_t)> onCyclicWrap_;
 
 	/**
      * @brief Initialize PWM instance
@@ -416,12 +556,22 @@ private:
 	/**
      * @brief Handle spread spectrum modulation
      */
-	IRAM_ATTR void handleSpreadSpectrum(); // placed in IRAM to reduce latency at kHz call rates
+	void handleSpreadSpectrum();
 
-	// Fade callback registered with ledc_cb_register per channel
+	// Fade callback registered with ledc_cb_register per channel — runs in ISR context
 	static bool IRAM_ATTR fadeDoneCallback(const ledc_cb_param_t* param, void* arg);
 
-	static IRAM_ATTR void timerIsr(void* arg); // placed in IRAM to reduce latency at kHz call rates
+	// Task-context dispatcher — deferred from ISR via System.queueCallback
+	static void dispatchFadeCallbacks(uint32_t param);
+
+	// Dequeue the head entry from a FIFO queue (advances head, decrements count)
+	FadeEntry dequeueFifo(ChannelFadeQueue& q);
+
+	// Start the next fade from the queue; returns false if queue empty
+	bool startNextFade(uint8_t channel_idx);
+
+	// esp_timer callback — runs in task context, static wrapper required for C function pointer
+	static void spreadSpectrumTimerCb(void* arg);
 };
 
 /** @} */

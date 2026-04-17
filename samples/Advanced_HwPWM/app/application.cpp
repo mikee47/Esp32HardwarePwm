@@ -21,7 +21,7 @@ namespace
 // If you move LED_PIN to a different position in pinList, update LED_CHANNEL accordingly.
 #define LED_CHANNEL 0
 
-std::vector<uint8_t> pinList{LED_PIN, 4, 5, 18, 19};
+std::vector<uint8_t> pinList{13, 12, 14, 27, 26};
 
 // Default duty percentages, one per channel
 const Esp32HardwarePwm::DutyCycle defaultDutyPercent[]{50.0f, 95.0f, 50.0f, 85.0f, 10.0f};
@@ -72,7 +72,7 @@ constexpr uint32_t CHASE_WAIT_MS = 200;
 
 SimpleTimer chaseTimer;
 
-void runChase()
+[[maybe_unused]] void runChase()
 {
 	static uint8_t currentChannel = 0;
 
@@ -89,8 +89,8 @@ void init()
 	Serial.begin(SERIAL_BAUD_RATE);
 	Serial.systemDebugOutput(true);
 
-	Serial << _F("PWM period = ") << pwm.getPeriod() << _F("us, freq = ") << pwm.getFrequency()
-		   << _F(", resolution = ") << pwm.getResolution() << _F(" bits, max duty = ") << pwm.getMaxDuty() << endl;
+	Serial << _F("PWM period = ") << pwm.getPeriod() << _F("us, freq = ") << pwm.getFrequency() << _F(", resolution = ")
+		   << pwm.getResolution() << _F(" bits, max duty = ") << pwm.getMaxDuty() << endl;
 
 	// Set default duty on every channel
 	for(uint8_t ch = 0; ch < pwm.getPinCount(); ++ch) {
