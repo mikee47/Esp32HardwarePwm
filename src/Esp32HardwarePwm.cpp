@@ -234,7 +234,7 @@ void Esp32HardwarePwm::update()
 	// todo: this does not do anything meaningful
 	if(!initialized_) {
 		debug_e("Cannot update: PWM not initialized");
-		return ;
+		return;
 	}
 
 	// Update all channels
@@ -283,7 +283,7 @@ bool Esp32HardwarePwm::setDutyChan(uint8_t channel, uint32_t duty, bool update_i
 	if(update_immediately) {
 		debug_i("Updating duty for pin %d channel %d", cfg.gpioPin, cfg.channel);
 		ledc_update_duty(timer_.speed_mode, cfg.channel);
-	}else{
+	} else {
 		debug_i("duty for pin %d channel %d will be updated on next update() call");
 	}
 	return true;

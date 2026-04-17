@@ -401,7 +401,6 @@ public:
 		onCyclicWrap_ = cb;
 	}
 
-	
 	// -----------------------------------------------------------------------
 	// Legacy interface — GPIO-pin-indexed (use channel interface for new code)
 	// -----------------------------------------------------------------------
@@ -465,13 +464,13 @@ private:
 	};
 
 	struct ChannelFadeQueue {
-		std::vector<FadeEntry> entries;  ///< Ring-buffer storage (size = queue capacity)
-		uint16_t head = 0;		 ///< Next entry to consume
-		uint16_t tail = 0;		 ///< Next free write slot
-		uint16_t count = 0;		 ///< FIFO: decrements on pop; CYCLIC: fixed after seeding
-		uint16_t cycleLen = 0;	 ///< CYCLIC: number of entries in the cycle
+		std::vector<FadeEntry> entries; ///< Ring-buffer storage (size = queue capacity)
+		uint16_t head = 0;				///< Next entry to consume
+		uint16_t tail = 0;				///< Next free write slot
+		uint16_t count = 0;				///< FIFO: decrements on pop; CYCLIC: fixed after seeding
+		uint16_t cycleLen = 0;			///< CYCLIC: number of entries in the cycle
 		QueueMode mode = QueueMode::FIFO;
-		bool autoStart = true;	 ///< If true, playback starts on first queueFadeChan(); false requires startQueue()
+		bool autoStart = true; ///< If true, playback starts on first queueFadeChan(); false requires startQueue()
 	};
 
 	struct PinConfig {

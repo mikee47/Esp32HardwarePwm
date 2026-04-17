@@ -89,8 +89,8 @@ void init()
 	Serial.begin(SERIAL_BAUD_RATE);
 	Serial.systemDebugOutput(true);
 
-	Serial << _F("PWM period = ") << pwm.getPeriod() << _F("us, freq = ") << pwm.getFrequency()
-		   << _F(", resolution = ") << pwm.getResolution() << _F(" bits, max duty = ") << pwm.getMaxDuty() << endl;
+	Serial << _F("PWM period = ") << pwm.getPeriod() << _F("us, freq = ") << pwm.getFrequency() << _F(", resolution = ")
+		   << pwm.getResolution() << _F(" bits, max duty = ") << pwm.getMaxDuty() << endl;
 
 	// Set default duty on every channel
 	for(uint8_t ch = 0; ch < pwm.getPinCount(); ++ch) {
