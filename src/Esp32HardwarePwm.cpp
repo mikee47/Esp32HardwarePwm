@@ -571,13 +571,21 @@ void Esp32HardwarePwm::dispatchFadeCallbacks(uint32_t param)
 		if(self->onFadeDone_)
 			self->onFadeDone_(i);
 
-		bool more = self->popAndStartNextFade(i);
+		bool more = self->startNextFade(i);
 		if(!more && self->onQueueEmpty_)
 			self->onQueueEmpty_(i);
 	}
 }
 
-bool Esp32HardwarePwm::popAndStartNextFade(uint8_t channel_idx)
+Esp32HardwarePwm::FadeEntry Esp32HardwarePwm::dequeueFifo(ChannelFadeQueue& q)
+{
+	FadeEntry entry = q.entries[q.head];
+	q.head = (q.head + 1) % (uint16_t)q.entries.size();
+	--q.count;
+	return entry;
+}
+
+bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 {
 	if(channel_idx >= pins_.size())
 		return false;
@@ -587,16 +595,14 @@ bool Esp32HardwarePwm::popAndStartNextFade(uint8_t channel_idx)
 	if(q.mode == FadeQueueMode::FIFO) {
 		if(q.count == 0)
 			return false;
-		FadeEntry entry = q.entries[q.head];
-		q.head = (q.head + 1) % (uint16_t)q.entries.size();
-		--q.count;
+		FadeEntry entry = dequeueFifo(q);
 		return fadeToValueChan(channel_idx, entry.targetDuty, entry.fadeTimeMs);
 	} else {
 		// CYCLIC
 		if(q.cycleLen == 0)
 			return false;
 		FadeEntry entry = q.entries[q.head];
-		uint8_t nextHead = (q.head + 1) % q.cycleLen;
+		uint16_t nextHead = (q.head + 1) % q.cycleLen;
 		if(nextHead == 0 && onCyclicWrap_)
 			onCyclicWrap_(channel_idx);
 		q.head = nextHead;
@@ -620,7 +626,7 @@ Esp32HardwarePwm::FadeQueueMode Esp32HardwarePwm::getFadeQueueMode(uint8_t chann
 	return fadeQueues_[channel].mode;
 }
 
-uint8_t Esp32HardwarePwm::getFadeQueueCount(uint8_t channel) const
+uint16_t Esp32HardwarePwm::getFadeQueueCount(uint8_t channel) const
 {
 	if(channel >= pins_.size())
 		return 0;
@@ -648,10 +654,10 @@ bool Esp32HardwarePwm::startFadeQueue(uint8_t channel)
 		return false;
 	if(q.mode == FadeQueueMode::CYCLIC && q.cycleLen == 0)
 		return false;
-	return popAndStartNextFade(channel);
+	return startNextFade(channel);
 }
 
-bool Esp32HardwarePwm::setFadeQueueCapacity(uint8_t channel, uint8_t depth)
+bool Esp32HardwarePwm::setFadeQueueCapacity(uint8_t channel, uint16_t depth)
 {
 	if(channel >= pins_.size() || depth == 0)
 		return false;
@@ -662,11 +668,11 @@ bool Esp32HardwarePwm::setFadeQueueCapacity(uint8_t channel, uint8_t depth)
 	return true;
 }
 
-uint8_t Esp32HardwarePwm::getFadeQueueCapacity(uint8_t channel) const
+uint16_t Esp32HardwarePwm::getFadeQueueCapacity(uint8_t channel) const
 {
 	if(channel >= pins_.size())
 		return 0;
-	return (uint8_t)fadeQueues_[channel].entries.size();
+	return (uint16_t)fadeQueues_[channel].entries.size();
 }
 
 void Esp32HardwarePwm::setFadeQueueAutoStart(uint8_t channel, bool autoStart)
@@ -691,9 +697,9 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 	}
 
 	ChannelFadeQueue& q = fadeQueues_[channel];
-	uint8_t capacity = (q.mode == FadeQueueMode::FIFO) ? q.count : q.cycleLen;
+	uint16_t capacity = (q.mode == FadeQueueMode::FIFO) ? q.count : q.cycleLen;
 
-	if(capacity >= (uint8_t)q.entries.size()) {
+	if(capacity >= (uint16_t)q.entries.size()) {
 		debug_e("queueFadeChan: channel %d queue full (%d entries)", channel, capacity);
 		return false;
 	}
@@ -711,7 +717,7 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 
 	// Auto-start: only when all entries have been seeded (autoStart=true) and channel is idle
 	if(q.autoStart && !isFadingChan(channel) && capacity == 0)
-		popAndStartNextFade(channel);
+		startNextFade(channel);
 
 	return true;
 }

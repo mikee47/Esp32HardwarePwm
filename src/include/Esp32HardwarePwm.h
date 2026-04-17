@@ -348,7 +348,7 @@ public:
 	}
 
 	/** @brief Return number of entries currently in the queue for a channel */
-	uint8_t getFadeQueueCount(uint8_t channel) const;
+	uint16_t getFadeQueueCount(uint8_t channel) const;
 
 	/** @brief Clear the queue for a channel and reset mode to FIFO.
 	 * The currently-running hardware fade (if any) completes normally, but no
@@ -369,10 +369,10 @@ public:
 	 * Can only be changed while the queue is empty.  Returns false if the
 	 * queue is not empty or depth is zero.
 	 */
-	bool setFadeQueueCapacity(uint8_t channel, uint8_t depth);
+	bool setFadeQueueCapacity(uint8_t channel, uint16_t depth);
 
 	/** @brief Get the maximum number of entries for a channel's queue */
-	uint8_t getFadeQueueCapacity(uint8_t channel) const;
+	uint16_t getFadeQueueCapacity(uint8_t channel) const;
 
 	/** @brief Override the auto-start behaviour for a channel's queue.
 	 * setFadeQueueMode() sets autoStart automatically (true for FIFO, false
@@ -565,8 +565,11 @@ private:
 	// Task-context dispatcher — deferred from ISR via System.queueCallback
 	static void dispatchFadeCallbacks(uint32_t param);
 
-	// Pop the next queued entry for a channel and start it; returns false if queue empty
-	bool popAndStartNextFade(uint8_t channel_idx);
+	// Dequeue the head entry from a FIFO queue (advances head, decrements count)
+	FadeEntry dequeueFifo(ChannelFadeQueue& q);
+
+	// Start the next fade from the queue; returns false if queue empty
+	bool startNextFade(uint8_t channel_idx);
 
 	// esp_timer callback — runs in task context, static wrapper required for C function pointer
 	static void spreadSpectrumTimerCb(void* arg);
