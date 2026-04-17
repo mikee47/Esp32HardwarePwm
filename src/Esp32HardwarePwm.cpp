@@ -3,7 +3,10 @@
  */
 
 #include "Esp32HardwarePwm.h"
+#undef ENABLE_DEBUG
+#define ENABLE_DEBUG HW_PWM_DEBUG
 #include <debug_progmem.h>
+#include <Platform/System.h>
 #include <driver/periph_ctrl.h>
 #include <esp_err.h>
 #include <esp_random.h>
@@ -88,6 +91,7 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& con
 	spreadSpectrum_ = config.spreadSpectrum;
 	phaseShift_ = config.phaseShift;
 	pins_.resize(pins.size());
+	fadeQueues_.resize(pins.size());
 
 	// basic sanity checks
 	if(pins.size() == 0) {
@@ -174,6 +178,7 @@ Esp32HardwarePwm::~Esp32HardwarePwm()
 bool Esp32HardwarePwm::setFrequency(uint32_t frequency)
 {
 	if(!initialized_ || pins_.empty()) {
+		debug_e("setFrequency: not initialized or no pins");
 		return false;
 	}
 
@@ -183,7 +188,7 @@ bool Esp32HardwarePwm::setFrequency(uint32_t frequency)
 
 	if(result == ESP_OK) {
 		timer_.frequency = frequency;
-		// debug_i("Set frequency to %d Hz", frequency);
+		debug_i("Set frequency to %d Hz", frequency);
 		return true;
 	} else {
 		debug_e("Failed to set frequency: %s", esp_err_to_name(result));
@@ -225,7 +230,8 @@ void Esp32HardwarePwm::update()
 {
 	// todo: this does not do anything meaningful
 	if(!initialized_) {
-		return;
+		debug_e("Cannot update: PWM not initialized");
+		return ;
 	}
 
 	// Update all channels
@@ -251,11 +257,13 @@ void Esp32HardwarePwm::stopAll(bool idle_level)
 bool Esp32HardwarePwm::setDutyChan(uint8_t channel, uint32_t duty, bool update_immediately)
 {
 	if(!initialized_ || channel >= pins_.size()) {
+		debug_e("setDutyChan: not initialized or channel %d out of range", channel);
 		return false;
 	}
 
 	auto& cfg = pins_[channel];
 	if(cfg.currentDuty == duty) {
+		debug_d("Duty for channel %d already at %d, no update needed", channel, duty);
 		return true; // no change
 	}
 
@@ -270,7 +278,10 @@ bool Esp32HardwarePwm::setDutyChan(uint8_t channel, uint32_t duty, bool update_i
 	ledc_set_duty(timer_.speed_mode, cfg.channel, duty);
 
 	if(update_immediately) {
+		debug_i("Updating duty for pin %d channel %d", cfg.gpioPin, cfg.channel);
 		ledc_update_duty(timer_.speed_mode, cfg.channel);
+	}else{
+		debug_i("duty for pin %d channel %d will be updated on next update() call");
 	}
 	return true;
 }
@@ -280,7 +291,7 @@ uint32_t Esp32HardwarePwm::getDutyChan(uint8_t channel)
 	if(!initialized_) {
 		return 0;
 	}
-	//debug_i("Getting duty for channel %d", channel);
+	debug_i("Getting duty for channel %d", channel);
 	if(channel >= pins_.size()) {
 		return 0;
 	}
@@ -290,6 +301,7 @@ uint32_t Esp32HardwarePwm::getDutyChan(uint8_t channel)
 bool Esp32HardwarePwm::setPhaseShiftChan(uint8_t channel, uint32_t phase_shift, bool update_immediately)
 {
 	if(!initialized_ || channel >= pins_.size()) {
+		debug_e("setPhaseShiftChan: not initialized or channel %d out of range", channel);
 		return false;
 	}
 
@@ -328,14 +340,17 @@ void Esp32HardwarePwm::disableFade()
 
 bool Esp32HardwarePwm::fadeToValueChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms)
 {
-	if(!initialized_ || !fadeInstalled_ || channel_idx >= pins_.size())
+	if(!initialized_ || !fadeInstalled_ || channel_idx >= pins_.size()) {
+		debug_e("fadeToValueChan: not initialized, fade not installed, or channel %d out of range", channel_idx);
 		return false;
+	}
 
 	uint32_t max_duty = getMaxDuty();
 	if(target_duty > max_duty)
 		target_duty = max_duty;
 
 	fadeDone_[channel_idx] = false;
+	pins_[channel_idx].targetDuty = target_duty;
 	esp_err_t result = ledc_set_fade_time_and_start(timer_.speed_mode, pins_[channel_idx].channel, target_duty,
 													fade_time_ms, LEDC_FADE_NO_WAIT);
 	if(result != ESP_OK) {
@@ -358,8 +373,10 @@ bool Esp32HardwarePwm::fadeToPercentChan(uint8_t channel_idx, float target_pct, 
 
 bool Esp32HardwarePwm::isFadingChan(uint8_t channel_idx) const
 {
-	if(channel_idx >= pins_.size())
+	if(channel_idx >= pins_.size()) {
+		debug_e("isFadingChan: channel %d out of range", channel_idx);
 		return false;
+	}
 	return !fadeDone_[channel_idx];
 }
 
@@ -370,6 +387,7 @@ bool Esp32HardwarePwm::isFadingChan(uint8_t channel_idx) const
 bool Esp32HardwarePwm::start(uint8_t pin)
 {
 	if(!initialized_) {
+		debug_e("start: not initialized");
 		return false;
 	}
 	return true;
@@ -379,6 +397,7 @@ bool Esp32HardwarePwm::start(uint8_t pin)
 bool Esp32HardwarePwm::stop(uint8_t pin, bool idle_level)
 {
 	if(!initialized_) {
+		debug_e("stop: not initialized");
 		return false;
 	}
 
@@ -394,6 +413,7 @@ bool Esp32HardwarePwm::stop(uint8_t pin, bool idle_level)
 		return true;
 	}
 
+	debug_e("stop: ledc_stop failed for pin %d: %s", pin, esp_err_to_name(result));
 	return false;
 }
 
@@ -413,8 +433,10 @@ bool Esp32HardwarePwm::initialize()
 	// Enable LEDC peripheral
 	periph_module_enable(PERIPH_LEDC_MODULE);
 
-	if(!enableFade())
+	if(!enableFade()) {
+		debug_e("initialize: enableFade failed");
 		return false;
+	}
 
 	debug_i("initialize timer");
 	// initialize the timer
@@ -476,7 +498,7 @@ bool Esp32HardwarePwm::setupSpreadSpectrum(int frequency, SpreadSpectrumConfig& 
 {
 	spreadSpectrum_ = config;
 	int interval_us = 1000000 * spreadSpectrum_.Subsampling / frequency;
-	esp_timer_create_args_t timer_args = {.callback = &Esp32HardwarePwm::timerIsr,
+	esp_timer_create_args_t timer_args = {.callback = &Esp32HardwarePwm::spreadSpectrumTimerCb,
 										  .arg = this,
 										  .dispatch_method = ESP_TIMER_TASK,
 										  .name = "SpreadSpectrum"};
@@ -496,23 +518,25 @@ bool Esp32HardwarePwm::setupSpreadSpectrum(int frequency, SpreadSpectrumConfig& 
 	return true;
 }
 
-bool Esp32HardwarePwm::fadeDoneCallback(const ledc_cb_param_t* param, void* arg)
+bool IRAM_ATTR Esp32HardwarePwm::fadeDoneCallback(const ledc_cb_param_t* param, void* arg)
 {
 	auto* self = static_cast<Esp32HardwarePwm*>(arg);
-	// param->channel is the hardware ledc_channel_t — find the pins_ index
-	for(size_t i = 0; i < self->pins_.size(); ++i) {
-		if(self->pins_[i].channel == param->channel) {
-			self->fadeDone_[i] = true;
-			break;
+	size_t i = param->channel - self->pins_[0].channel;
+	if(i < self->pins_.size()) {
+		self->pins_[i].currentDuty = self->pins_[i].targetDuty;
+		self->fadeDone_[i] = true;
+		self->pendingFadeCallbacks_ |= (1u << i);
+		if(!self->fadeCallbackQueued_) {
+			self->fadeCallbackQueued_ = true;
+			System.queueCallback(dispatchFadeCallbacks, reinterpret_cast<uint32_t>(self));
 		}
 	}
-	return false; // no higher-priority task woken
+	return false;
 }
 
-void Esp32HardwarePwm::timerIsr(void* arg)
+void Esp32HardwarePwm::spreadSpectrumTimerCb(void* arg)
 {
-	auto* self = static_cast<Esp32HardwarePwm*>(arg);
-	self->handleSpreadSpectrum();
+	static_cast<Esp32HardwarePwm*>(arg)->handleSpreadSpectrum();
 }
 
 void Esp32HardwarePwm::handleSpreadSpectrum()
@@ -520,4 +544,121 @@ void Esp32HardwarePwm::handleSpreadSpectrum()
 	int width = (spreadSpectrum_.WidthPercent * timer_.frequency) / 100;
 	int r = esp_random() % (2 * width + 1) - width; // r in [-width, +width]
 	ledc_set_freq(timer_.speed_mode, timer_.timer_num, timer_.frequency + r);
+}
+
+// ---------------------------------------------------------------------------
+// Fade queue
+// ---------------------------------------------------------------------------
+
+static_assert(SOC_LEDC_CHANNEL_NUM <= 32, "pendingFadeCallbacks_ bitmask too narrow for this SoC");
+
+void Esp32HardwarePwm::dispatchFadeCallbacks(uint32_t param)
+{
+	auto* self = reinterpret_cast<Esp32HardwarePwm*>(param);
+	self->fadeCallbackQueued_ = false;
+
+	// Snapshot and clear the bitmask atomically in task context
+	uint32_t pending = self->pendingFadeCallbacks_;
+	self->pendingFadeCallbacks_ = 0;
+
+	for(uint8_t i = 0; i < self->pins_.size(); ++i) {
+		if(!(pending & (1u << i)))
+			continue;
+
+		if(self->onFadeDone_)
+			self->onFadeDone_(i);
+
+		bool more = self->popAndStartNextFade(i);
+		if(!more && self->onQueueEmpty_)
+			self->onQueueEmpty_(i);
+	}
+}
+
+bool Esp32HardwarePwm::popAndStartNextFade(uint8_t channel_idx)
+{
+	if(channel_idx >= pins_.size())
+		return false;
+
+	ChannelFadeQueue& q = fadeQueues_[channel_idx];
+
+	if(q.mode == FadeQueueMode::FIFO) {
+		if(q.count == 0)
+			return false;
+		FadeEntry entry = q.entries[q.head];
+		q.head = (q.head + 1) % FADE_QUEUE_DEPTH;
+		--q.count;
+		return fadeToValueChan(channel_idx, entry.targetDuty, entry.fadeTimeMs);
+	} else {
+		// CYCLIC
+		if(q.cycleLen == 0)
+			return false;
+		FadeEntry entry = q.entries[q.head];
+		uint8_t nextHead = (q.head + 1) % q.cycleLen;
+		if(nextHead == 0 && onCyclicWrap_)
+			onCyclicWrap_(channel_idx);
+		q.head = nextHead;
+		return fadeToValueChan(channel_idx, entry.targetDuty, entry.fadeTimeMs);
+	}
+}
+
+void Esp32HardwarePwm::setFadeQueueMode(uint8_t channel, FadeQueueMode mode)
+{
+	if(channel >= pins_.size())
+		return;
+	fadeQueues_[channel].mode = mode;
+}
+
+Esp32HardwarePwm::FadeQueueMode Esp32HardwarePwm::getFadeQueueMode(uint8_t channel) const
+{
+	if(channel >= pins_.size())
+		return FadeQueueMode::FIFO;
+	return fadeQueues_[channel].mode;
+}
+
+uint8_t Esp32HardwarePwm::getFadeQueueCount(uint8_t channel) const
+{
+	if(channel >= pins_.size())
+		return 0;
+	const ChannelFadeQueue& q = fadeQueues_[channel];
+	return (q.mode == FadeQueueMode::FIFO) ? q.count : q.cycleLen;
+}
+
+void Esp32HardwarePwm::resetFadeQueue(uint8_t channel)
+{
+	if(channel >= pins_.size())
+		return;
+	fadeQueues_[channel] = ChannelFadeQueue{};
+}
+
+bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs)
+{
+	if(!initialized_ || !fadeInstalled_ || channel >= pins_.size()) {
+		debug_e("queueFadeChan: not initialized, fade not installed, or channel %d out of range", channel);
+		return false;
+	}
+
+	ChannelFadeQueue& q = fadeQueues_[channel];
+	uint8_t capacity = (q.mode == FadeQueueMode::FIFO) ? q.count : q.cycleLen;
+
+	if(capacity >= FADE_QUEUE_DEPTH) {
+		debug_e("queueFadeChan: channel %d queue full (%d entries)", channel, capacity);
+		return false;
+	}
+
+	if(targetDuty > getMaxDuty())
+		targetDuty = getMaxDuty();
+
+	q.entries[q.tail] = {targetDuty, fadeTimeMs};
+	q.tail = (q.tail + 1) % FADE_QUEUE_DEPTH;
+
+	if(q.mode == FadeQueueMode::FIFO)
+		++q.count;
+	else
+		++q.cycleLen;
+
+	// If the channel is idle and this is the first entry, start immediately
+	if(!isFadingChan(channel) && capacity == 0)
+		popAndStartNextFade(channel);
+
+	return true;
 }
