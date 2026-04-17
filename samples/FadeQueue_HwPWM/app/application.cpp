@@ -27,7 +27,7 @@ std::vector<uint8_t> pinList{13, 12, 14, 27, 26};
 Esp32HardwarePwm pwm(pinList, Esp32HardwarePwm::Config{
 	.timer = {
 		.resolution = LEDC_TIMER_10_BIT,
-		.frequency  = 1000,
+		.frequency  = 4000,
 	},
 	.phaseShift = {
 		.mode = Esp32HardwarePwm::PhaseShiftMode::OFF,
@@ -38,7 +38,7 @@ Esp32HardwarePwm pwm(pinList, Esp32HardwarePwm::Config{
 });
 // clang-format on
 
-constexpr uint32_t FADE_MS = 800; ///< Duration of each individual fade step
+constexpr uint32_t FADE_MS = 1600; ///< Duration of each individual fade step
 
 // Track how many complete CYCLIC loops have fired on channel 1
 uint8_t cyclicWrapCount = 0;
@@ -86,20 +86,27 @@ void setupFadeQueueDemo()
 	// ------------------------------------------------------------------
 	// Channel 0: FIFO — 3 fades pre-loaded, then channel goes idle
 	// ------------------------------------------------------------------
-	Serial.println(_F("Channel 0: FIFO — queuing 3 fades (0%→100%→0%→50%)"));
+	Serial.println(_F("Channel 0: FIFO — queuing 3 fades (100%->0%->50%->0%->100%->50%)"));
 	// Mode defaults to FIFO; no setFadeQueueMode call needed
-	pwm.queueFadePercentChan(0, 100.0f, FADE_MS);
-	pwm.queueFadePercentChan(0,   0.0f, FADE_MS);
-	pwm.queueFadePercentChan(0,  50.0f, FADE_MS);
-
+	pwm.queueFadePercentChan(0, 100.0f, FADE_MS/5);
+	pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);
+	pwm.queueFadePercentChan(0,  50.0f, FADE_MS/2);
+    pwm.queueFadePercentChan(0,   0.0f, FADE_MS/5);
+    pwm.queueFadePercentChan(0, 100.0f, FADE_MS/5);
+    pwm.queueFadePercentChan(0,  50.0f, FADE_MS);
 	// ------------------------------------------------------------------
 	// Channel 1: CYCLIC — 3 entries loop until resetFadeQueue() is called
 	// ------------------------------------------------------------------
 	Serial.println(_F("Channel 1: CYCLIC — 3-entry loop (0%→100%→0%→50%…)"));
 	pwm.setFadeQueueMode(1, Esp32HardwarePwm::FadeQueueMode::CYCLIC);
+	// Demonstrate runtime-configurable queue depth (4 slots instead of default 10)
+	pwm.setFadeQueueCapacity(1, 4);
 	pwm.queueFadePercentChan(1, 100.0f, FADE_MS);
 	pwm.queueFadePercentChan(1,   0.0f, FADE_MS);
 	pwm.queueFadePercentChan(1,  50.0f, FADE_MS);
+	pwm.queueFadePercentChan(1,   0.0f, FADE_MS);
+	// All entries seeded — now start the cycle explicitly
+	pwm.startFadeQueue(1);
 }
 
 } // namespace

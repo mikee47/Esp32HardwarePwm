@@ -330,8 +330,10 @@ public:
 	FadeQueueMode getFadeQueueMode(uint8_t channel) const;
 
 	/** @brief Enqueue a fade on a channel (absolute duty target).
-	 * If the channel is idle and the queue was empty, playback starts immediately.
-	 * Returns false if the queue is full (FADE_QUEUE_DEPTH entries already pending).
+	 * For FIFO queues (autoStart=true, the default), playback starts automatically
+	 * on the first entry when the channel is idle.  For CYCLIC queues
+	 * (autoStart=false by default), call startFadeQueue() after seeding all entries.
+	 * Returns false if the queue is full.
 	 */
 	bool queueFadeChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs);
 
@@ -351,8 +353,35 @@ public:
 	/** @brief Clear the queue for a channel and reset mode to FIFO.
 	 * The currently-running hardware fade (if any) completes normally, but no
 	 * further queue entries are started and no callbacks fire afterwards.
+	 * Queue capacity is preserved.
 	 */
 	void resetFadeQueue(uint8_t channel);
+
+	/** @brief Explicitly start a queued sequence.
+	 * Must be called after seeding a CYCLIC queue (autoStart=false).  For FIFO
+	 * queues with autoStart=true this is normally not needed, but can be used
+	 * to restart an idle queue.  Returns false if the queue is empty or the
+	 * channel is already fading.
+	 */
+	bool startFadeQueue(uint8_t channel);
+
+	/** @brief Set the maximum number of entries for a channel's queue.
+	 * Can only be changed while the queue is empty.  Returns false if the
+	 * queue is not empty or depth is zero.
+	 */
+	bool setFadeQueueCapacity(uint8_t channel, uint8_t depth);
+
+	/** @brief Get the maximum number of entries for a channel's queue */
+	uint8_t getFadeQueueCapacity(uint8_t channel) const;
+
+	/** @brief Override the auto-start behaviour for a channel's queue.
+	 * setFadeQueueMode() sets autoStart automatically (true for FIFO, false
+	 * for CYCLIC).  Use this to override that default.
+	 */
+	void setFadeQueueAutoStart(uint8_t channel, bool autoStart);
+
+	/** @brief Returns true if the queue starts automatically on first queueFadeChan() call */
+	bool getFadeQueueAutoStart(uint8_t channel) const;
 
 	/** @brief Callback fired after every individual fade completes (even if more are queued) */
 	void setOnFadeDoneCallback(Delegate<void(uint8_t)> cb)
@@ -436,12 +465,13 @@ private:
 	};
 
 	struct ChannelFadeQueue {
-		FadeEntry entries[FADE_QUEUE_DEPTH];
-		uint8_t head = 0;		 ///< Next entry to consume
-		uint8_t tail = 0;		 ///< Next free write slot
-		uint8_t count = 0;		 ///< FIFO: decrements on pop; CYCLIC: fixed after seeding
-		uint8_t cycleLen = 0;	 ///< CYCLIC: number of entries in the cycle
+		std::vector<FadeEntry> entries;  ///< Ring-buffer storage (size = queue capacity)
+		uint16_t head = 0;		 ///< Next entry to consume
+		uint16_t tail = 0;		 ///< Next free write slot
+		uint16_t count = 0;		 ///< FIFO: decrements on pop; CYCLIC: fixed after seeding
+		uint16_t cycleLen = 0;	 ///< CYCLIC: number of entries in the cycle
 		FadeQueueMode mode = FadeQueueMode::FIFO;
+		bool autoStart = true;	 ///< If true, playback starts on first queueFadeChan(); false requires startFadeQueue()
 	};
 
 	struct PinConfig {
