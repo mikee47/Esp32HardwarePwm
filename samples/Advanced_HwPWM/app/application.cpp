@@ -21,7 +21,7 @@ namespace
 // If you move LED_PIN to a different position in pinList, update LED_CHANNEL accordingly.
 #define LED_CHANNEL 0
 
-std::vector<uint8_t> pinList{13, 12, 14, 27, 26};
+std::vector<uint8_t> pinList{LED_PIN, 4, 5, 18, 19};
 
 // Default duty percentages, one per channel
 const Esp32HardwarePwm::DutyCycle defaultDutyPercent[]{50.0f, 95.0f, 50.0f, 85.0f, 10.0f};
@@ -29,8 +29,8 @@ const Esp32HardwarePwm::DutyCycle defaultDutyPercent[]{50.0f, 95.0f, 50.0f, 85.0
 // clang-format off
 Esp32HardwarePwm pwm(pinList, Esp32HardwarePwm::Config{
 	.timer = {
-		.resolution = LEDC_TIMER_9_BIT,
-		.frequency  = 44100,
+		.resolution = LEDC_TIMER_12_BIT,
+		.frequency  = 4000,
 	},
 	.phaseShift = {
 		.mode = Esp32HardwarePwm::PhaseShiftMode::AUTO,
@@ -41,42 +41,45 @@ Esp32HardwarePwm pwm(pinList, Esp32HardwarePwm::Config{
 });
 // clang-format on
 
-// ---------------------------------------------------------------------------
-// Fade queue demo
-//   Channel 0: FIFO — 3 fades pre-loaded; callbacks log each event.
-//   Channel 1: CYCLIC — 3 entries that loop indefinitely; wrap callback counts loops.
-// ---------------------------------------------------------------------------
-constexpr uint32_t FADE_TIME_MS = 800;
+constexpr uint32_t FADE_TIME_MS = 2000; // duration of each sweep leg
 
-void setupFadeQueueDemo()
+SimpleTimer procTimer;
+
+void startNextFade()
 {
-	// --- Shared callbacks (all channels) ---
-	pwm.setOnFadeDoneCallback([](uint8_t ch) {
-		Serial << _F("onFadeDone   ch=") << ch
-		       << _F("  duty=") << pwm.getDutyChan(ch) << endl;
-	});
-	pwm.setOnQueueEmptyCallback([](uint8_t ch) {
-		Serial << _F("onQueueEmpty ch=") << ch << _F(" — queue drained") << endl;
-	});
-	pwm.setOnCyclicWrapCallback([](uint8_t ch) {
-		static uint32_t wrapCount = 0;
-		Serial << _F("onCyclicWrap ch=") << ch
-		       << _F("  wrap#") << ++wrapCount << endl;
-	});
+	// Alternate between fading to 100% and back to 0%
+	static bool countUp = true;
+	pwm.fadeToPercentChan(LED_CHANNEL, countUp ? 100.0f : 0.0f, FADE_TIME_MS);
+	countUp = !countUp;
+}
 
-	// --- Channel 0: FIFO, 3 fades ---
-	// Mode defaults to FIFO; no setFadeQueueMode call needed
-	Serial << _F("Channel 0: queuing 3 FIFO fades") << endl;
-	pwm.queueFadePercentChan(0, 100.0f, FADE_TIME_MS);
-	pwm.queueFadePercentChan(0,   0.0f, FADE_TIME_MS);
-	pwm.queueFadePercentChan(0,  50.0f, FADE_TIME_MS);
+void checkFadeDone()
+{
+	// When the hardware fade completes, immediately kick off the next one
+	if(!pwm.isFadingChan(LED_CHANNEL)) {
+		startNextFade();
+	}
+}
 
-	// --- Channel 1: CYCLIC, 3 entries that loop ---
-	Serial << _F("Channel 1: queuing 3 CYCLIC fades (loops forever)") << endl;
-	pwm.setFadeQueueMode(1, Esp32HardwarePwm::FadeQueueMode::CYCLIC);
-	pwm.queueFadePercentChan(1, 100.0f, FADE_TIME_MS);
-	pwm.queueFadePercentChan(1,   0.0f, FADE_TIME_MS);
-	pwm.queueFadePercentChan(1,  50.0f, FADE_TIME_MS);
+// ---------------------------------------------------------------------------
+// Test routine 2: chase all channels
+//   Every 200 ms: set current channel to 100% and start a 1 s fade to 0%,
+//   then move to the next channel. Fades overlap — each channel is still
+//   fading when the next one fires.
+// ---------------------------------------------------------------------------
+constexpr uint32_t CHASE_FADE_MS = 1000;
+constexpr uint32_t CHASE_WAIT_MS = 200;
+
+SimpleTimer chaseTimer;
+
+[[maybe_unused]] void runChase()
+{
+	static uint8_t currentChannel = 0;
+
+	pwm.setDutyChanPercent(currentChannel, 100.0f);
+	pwm.fadeToPercentChan(currentChannel, 0.0f, CHASE_FADE_MS);
+
+	currentChannel = (currentChannel + 1) % pwm.getPinCount();
 }
 
 } // namespace
@@ -96,5 +99,15 @@ void init()
 
 	Serial << _F("PWM output set on all ") << pwm.getPinCount() << _F(" channels.") << endl;
 
-	setupFadeQueueDemo();
+	// --- choose one of the two test routines ---
+
+	// Routine 1: single-channel hardware sweep on LED_CHANNEL
+	Serial << _F("Routine 1: LED (pin ") << LED_PIN << _F(", channel ") << LED_CHANNEL
+		   << _F(") sweeps 0–100% using hardware fade.") << endl;
+	startNextFade();
+	procTimer.initializeMs<20>(checkFadeDone).start();
+
+	// Routine 2: chase — uncomment to use instead of routine 1
+	// Serial << _F("Routine 2: chasing all ") << pwm.getPinCount() << _F(" channels.") << endl;
+	// chaseTimer.initializeMs<CHASE_WAIT_MS>(runChase).start();
 }
