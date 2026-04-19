@@ -34,6 +34,7 @@ constexpr uint32_t MICROFADE_MS          = 20;    ///< Each micro-step duration 
 constexpr uint32_t TOTAL_STEPS           = TOTAL_FADE_MS / MICROFADE_MS; ///< 1000
 constexpr uint8_t  CH_SINGLE             = 0;     ///< Single long fade channel
 constexpr uint8_t  CH_MICRO              = 1;     ///< Micro-fade queue channel
+constexpr uint8_t  CH_TRI               = 2;     ///< Continuous triangle wave (visual monitoring)
 constexpr uint8_t  MICROFADE_QUEUE_DEPTH = 20;    ///< FIFO depth for CH1
 
 // ---------------------------------------------------------------------------
@@ -100,7 +101,7 @@ static size_t                  currentConfig = 0;
 // ---------------------------------------------------------------------------
 // Per-run mutable state
 // ---------------------------------------------------------------------------
-static std::vector<uint8_t> pinList{13, 12};
+static std::vector<uint8_t> pinList{13, 12, 14}; // GPIO 14 = CH_TRI triangle output
 static Esp32HardwarePwm*    pwm         = nullptr;
 static int64_t              tStart      = 0;
 static int64_t              tEndCh0     = 0;
@@ -256,6 +257,19 @@ void runConfig(size_t idx)
     pwm->setQueueCapacity(CH_MICRO, MICROFADE_QUEUE_DEPTH);
     pwm->setQueueAutoStart(CH_MICRO, true);
 
+    // CH_TRI: continuous triangle wave 0→100→0% every 600 ms (CYCLIC, independent of test)
+    // Capacity = 2 × ceil(maxDuty/1023) to hold all split segments for the full cycle.
+    {
+        uint32_t mxd     = (1u << (uint8_t)cfg.resolution) - 1;
+        uint16_t halfSeg = (uint16_t)((mxd + 1022u) / 1023u);
+        if(halfSeg == 0) halfSeg = 1;
+        pwm->setQueueMode(CH_TRI, Esp32HardwarePwm::QueueMode::CYCLIC);
+        pwm->setQueueCapacity(CH_TRI, (uint16_t)(2u * halfSeg));
+        pwm->queueFadePercentChan(CH_TRI, 100.0f, 300); // 0% → 100% in 300 ms
+        pwm->queueFadePercentChan(CH_TRI, 0.0f, 300);   // 100% → 0% in 300 ms
+        pwm->startQueue(CH_TRI);
+    }
+
     tStart = esp_timer_get_time();
     pwm->queueFadePercentChan(CH_SINGLE, 100.0f, TOTAL_FADE_MS);
     pushMicroSteps();
@@ -388,7 +402,8 @@ void printTable()
     Serial.printf("static const Esp32HardwarePwm::CalibrationEntry hwpwmCalib_%s[] = {\n", kSocName);
     Serial.println(_F("    // { frequency, resolution, overheadUs }"));
 
-    size_t entryCount = 0;
+    size_t entryCount   = 0;
+    size_t skippedScale = 0;
     for(size_t i = 0; i < configs.size(); ++i) {
         const TestResult& r = results[i];
         if(!r.valid)
@@ -398,6 +413,22 @@ void printTable()
         // depends on the requested step duration and is not portable.
         if(isHwLimitedMicrofade(configs[i].frequency, configs[i].resolution))
             continue;
+        // Skip small-scale (IDF scale 2–9) configs.  When scale is small, a 1 ms shift
+        // in the requested fade time causes a discrete scale change (e.g. 5→6) that moves
+        // the actual LEDC duration by 2–5 ms.  The carry-based overhead correction cannot
+        // converge: each iteration flips the sign of the residual.  Let these configs fall
+        // back to the formula in computeReloadOverhead().
+        {
+            uint32_t mxd    = (1u << (uint8_t)configs[i].resolution) - 1;
+            uint32_t oh_ms  = (1500u + 1000000u / configs[i].frequency) / 1000u;
+            uint32_t adj_ms = (MICROFADE_MS > oh_ms) ? (MICROFADE_MS - oh_ms) : 1u;
+            uint32_t cyc    = configs[i].frequency * adj_ms / 1000u;
+            uint32_t sc     = (cyc > 0u && cyc < mxd) ? (mxd / cyc) : 0u;
+            if(sc >= 2u && sc < 10u) {
+                ++skippedScale;
+                continue;
+            }
+        }
         // Measured overhead = formula model + per-step residual (clamped to 0)
         int64_t model    = 1500LL + 1000000LL / (int64_t)configs[i].frequency;
         int64_t actual   = model + r.latPerStep_us;
@@ -419,8 +450,10 @@ void printTable()
     Serial.println();
     Serial.printf("#endif // HWPWM_CALIB_%s_H\n", kSocName);
     Serial.println(_F("// ---- copy to here ----"));
-    Serial.printf("// (%u entries; %u hw-limited configs excluded)\n",
-                  (unsigned)entryCount, (unsigned)(configs.size() - entryCount));
+    Serial.printf("// (%u entries; %u hw-limited + %u small-scale configs excluded)\n",
+                  (unsigned)entryCount,
+                  (unsigned)(configs.size() - entryCount - skippedScale),
+                  (unsigned)skippedScale);
 }
 
 } // namespace

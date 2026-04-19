@@ -10,61 +10,37 @@
 #define HWPWM_CALIB_esp32_H
 
 // clang-format off
+// Entries only exist where IDF scale >= 10 (large scale, linear response to
+// requested-time adjustments).  Small-scale (2–9) configs are excluded because
+// a 1 ms shift in the carry-adjusted request changes IDF scale by ±1, which
+// moves the actual LEDC duration by 2–5 ms — making calibration oscillate.
+// Those configs fall back to the formula in computeReloadOverhead().
 static const Esp32HardwarePwm::CalibrationEntry hwpwmCalib_esp32[] = {
     // { frequency, resolution, overheadUs }
-    {  1000, LEDC_TIMER_8_BIT,  1953 }, //  1kHz/ 8-bit
-    {  2000, LEDC_TIMER_8_BIT,  1428 }, //  2kHz/ 8-bit
-    {  3000, LEDC_TIMER_8_BIT,  3728 }, //  3kHz/ 8-bit
-    {  4000, LEDC_TIMER_8_BIT,  3169 }, //  4kHz/ 8-bit
-    {  5000, LEDC_TIMER_8_BIT,  7602 }, //  5kHz/ 8-bit
-    {  6000, LEDC_TIMER_8_BIT,  3251 }, //  6kHz/ 8-bit
-    { 15000, LEDC_TIMER_8_BIT,  1449 }, // 15kHz/ 8-bit
-    { 16000, LEDC_TIMER_8_BIT,  1481 }, // 16kHz/ 8-bit
-    {  1000, LEDC_TIMER_9_BIT,  6267 }, //  1kHz/ 9-bit
-    {  2000, LEDC_TIMER_9_BIT,  1459 }, //  2kHz/ 9-bit
-    {  3000, LEDC_TIMER_9_BIT,  1809 }, //  3kHz/ 9-bit
-    {  4000, LEDC_TIMER_9_BIT,  1051 }, //  4kHz/ 9-bit
-    {  5000, LEDC_TIMER_9_BIT,  2622 }, //  5kHz/ 9-bit
-    {  6000, LEDC_TIMER_9_BIT,  3256 }, //  6kHz/ 9-bit
-    {  7000, LEDC_TIMER_9_BIT,  2331 }, //  7kHz/ 9-bit
-    {  8000, LEDC_TIMER_9_BIT,  3169 }, //  8kHz/ 9-bit
-    {  9000, LEDC_TIMER_9_BIT,  4424 }, //  9kHz/ 9-bit
-    { 10000, LEDC_TIMER_9_BIT,  7303 }, // 10kHz/ 9-bit
-    { 11000, LEDC_TIMER_9_BIT,  4954 }, // 11kHz/ 9-bit
-    { 12000, LEDC_TIMER_9_BIT,  3001 }, // 12kHz/ 9-bit
-    { 13000, LEDC_TIMER_9_BIT,  1350 }, // 13kHz/ 9-bit
-    {  1000, LEDC_TIMER_10_BIT,  2952 }, //  1kHz/10-bit
-    {  2000, LEDC_TIMER_10_BIT,  1459 }, //  2kHz/10-bit
-    {  3000, LEDC_TIMER_10_BIT,  1678 }, //  3kHz/10-bit
-    {  4000, LEDC_TIMER_10_BIT,  1022 }, //  4kHz/10-bit
-    {  5000, LEDC_TIMER_10_BIT,  1083 }, //  5kHz/10-bit
-    {  6000, LEDC_TIMER_10_BIT,  1700 }, //  6kHz/10-bit
-    {  7000, LEDC_TIMER_10_BIT,  1111 }, //  7kHz/10-bit
-    {  8000, LEDC_TIMER_10_BIT,  1298 }, //  8kHz/10-bit
-    {  9000, LEDC_TIMER_10_BIT,  2226 }, //  9kHz/10-bit
-    { 10000, LEDC_TIMER_10_BIT,  2223 }, // 10kHz/10-bit
-    { 11000, LEDC_TIMER_10_BIT,  2228 }, // 11kHz/10-bit
-    { 12000, LEDC_TIMER_10_BIT,  3009 }, // 12kHz/10-bit
-    { 13000, LEDC_TIMER_10_BIT,  1344 }, // 13kHz/10-bit
-    { 14000, LEDC_TIMER_10_BIT,  2506 }, // 14kHz/10-bit
-    { 15000, LEDC_TIMER_10_BIT,  4275 }, // 15kHz/10-bit
-    { 16000, LEDC_TIMER_10_BIT,  2857 }, // 16kHz/10-bit
-    {  1000, LEDC_TIMER_11_BIT,  2952 }, //  1kHz/11-bit
-    {  2000, LEDC_TIMER_11_BIT,  1460 }, //  2kHz/11-bit
-    {  3000, LEDC_TIMER_11_BIT,  1290 }, //  3kHz/11-bit
-    {  4000, LEDC_TIMER_11_BIT,  1021 }, //  4kHz/11-bit
-    {  5000, LEDC_TIMER_11_BIT,  1098 }, //  5kHz/11-bit
-    {  6000, LEDC_TIMER_11_BIT,   299 }, //  6kHz/11-bit
-    {  7000, LEDC_TIMER_11_BIT,   640 }, //  7kHz/11-bit
-    {  8000, LEDC_TIMER_11_BIT,   725 }, //  8kHz/11-bit
-    {  9000, LEDC_TIMER_11_BIT,  1451 }, //  9kHz/11-bit
-    { 10000, LEDC_TIMER_11_BIT,  1144 }, // 10kHz/11-bit
-    { 11000, LEDC_TIMER_11_BIT,  1191 }, // 11kHz/11-bit
-    { 12000, LEDC_TIMER_11_BIT,  1641 }, // 12kHz/11-bit
-    { 13000, LEDC_TIMER_11_BIT,  1344 }, // 13kHz/11-bit
-    { 14000, LEDC_TIMER_11_BIT,  1056 }, // 14kHz/11-bit
-    { 15000, LEDC_TIMER_11_BIT,  1171 }, // 15kHz/11-bit
-    { 16000, LEDC_TIMER_11_BIT,  1268 }, // 16kHz/11-bit
+    // ---- 8-bit: only 1 kHz has scale >= 10 (scale=14); 15/16 kHz use cycle_num path ----
+    {  1000, LEDC_TIMER_8_BIT,  1953 }, //  1kHz/ 8-bit  scale=14
+    { 15000, LEDC_TIMER_8_BIT,  1449 }, // 15kHz/ 8-bit  cycle_num path
+    { 16000, LEDC_TIMER_8_BIT,  1481 }, // 16kHz/ 8-bit  cycle_num path
+    // ---- 9-bit: 1–2 kHz only (scale 28, 14) ----
+    {  1000, LEDC_TIMER_9_BIT,  6267 }, //  1kHz/ 9-bit  scale=28
+    {  2000, LEDC_TIMER_9_BIT,  1459 }, //  2kHz/ 9-bit  scale=14
+    // ---- 10-bit: 1–5 kHz (scale 56, 28, 17, 13, 10) ----
+    {  1000, LEDC_TIMER_10_BIT,  2952 }, //  1kHz/10-bit  scale=56
+    {  2000, LEDC_TIMER_10_BIT,  1459 }, //  2kHz/10-bit  scale=28
+    {  3000, LEDC_TIMER_10_BIT,  1678 }, //  3kHz/10-bit  scale=17
+    {  4000, LEDC_TIMER_10_BIT,  1022 }, //  4kHz/10-bit  scale=13
+    {  5000, LEDC_TIMER_10_BIT,  1083 }, //  5kHz/10-bit  scale=10
+    // ---- 11-bit: 1–10 kHz (scale 113..10) ----
+    {  1000, LEDC_TIMER_11_BIT,  2952 }, //  1kHz/11-bit  scale=113
+    {  2000, LEDC_TIMER_11_BIT,  1460 }, //  2kHz/11-bit  scale=56
+    {  3000, LEDC_TIMER_11_BIT,  1290 }, //  3kHz/11-bit  scale=35
+    {  4000, LEDC_TIMER_11_BIT,  1021 }, //  4kHz/11-bit  scale=26
+    {  5000, LEDC_TIMER_11_BIT,  1098 }, //  5kHz/11-bit  scale=21
+    {  6000, LEDC_TIMER_11_BIT,   299 }, //  6kHz/11-bit  scale=17
+    {  7000, LEDC_TIMER_11_BIT,   640 }, //  7kHz/11-bit  scale=15
+    {  8000, LEDC_TIMER_11_BIT,   725 }, //  8kHz/11-bit  scale=13
+    {  9000, LEDC_TIMER_11_BIT,  1451 }, //  9kHz/11-bit  scale=11
+    { 10000, LEDC_TIMER_11_BIT,  1144 }, // 10kHz/11-bit  scale=10
     {  1000, LEDC_TIMER_12_BIT,  2952 }, //  1kHz/12-bit
     {  2000, LEDC_TIMER_12_BIT,  1460 }, //  2kHz/12-bit
     {  3000, LEDC_TIMER_12_BIT,   630 }, //  3kHz/12-bit
