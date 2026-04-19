@@ -165,3 +165,105 @@ Config        | Quantisation error (CH0)      | Reload overhead (CH1)
  7kHz/12-bit  | -   117289 us   -0.5864%     |         96 ms        96 us     0.67 cyc
  8kHz/12-bit  | -    36224 us   -0.1811%     |        272 ms       272 us     2.18 cyc
 ===========================================
+
+full calibration values:
+========= Timing Accuracy Results =========
+Test: 5000 ms total  |  250 x 20 ms micro-fades
+
+Config        | Quantisation error (CH0)     | Reload overhead (CH1)
+              | deviation      %% of total   | total dev ms  per step us  timer cyc
+--------------|------------------------------|---------------------------
+ 1kHz/ 8-bit  | -   146801 us   -2.9360%     | -      136 ms  -     547 us    -0.55 cyc
+ 2kHz/ 8-bit  | -    27018 us   -0.5404%     | -      143 ms  -     572 us    -1.14 cyc
+ 3kHz/ 8-bit  | -    74435 us   -1.4887%     |        474 ms      1896 us     5.69 cyc
+ 4kHz/ 8-bit  | -    27112 us   -0.5422%     |        354 ms      1419 us     5.68 cyc
+ 5kHz/ 8-bit  | -     1676 us   -0.0335%     |       1475 ms      5902 us    29.51 cyc
+ 6kHz/ 8-bit  | -    27395 us   -0.5479%     |        396 ms      1585 us     9.51 cyc
+ 7kHz/ 8-bit  | -     8796 us   -0.1759%     |       1228 ms      4912 us    34.38 cyc
+ 8kHz/ 8-bit  | -    27244 us   -0.5449%     |       2969 ms     11878 us    95.02 cyc
+ 9kHz/ 8-bit  | -    13049 us   -0.2610%     |       2084 ms      8337 us    75.03 cyc
+10kHz/ 8-bit  | -     1725 us   -0.0345%     |       1375 ms      5503 us    55.03 cyc
+11kHz/ 8-bit  | -    15478 us   -0.3096%     |        796 ms      3186 us    35.05 cyc
+12kHz/ 8-bit  | -     5797 us   -0.1159%     |        313 ms      1255 us    15.06 cyc
+13kHz/ 8-bit  | -    17303 us   -0.3461%     | -      108 ms  -    434 us    -5.64 cyc
+14kHz/ 8-bit  | -     9294 us   -0.1859%     | -      257 ms  -   1030 us   -14.42 cyc
+15kHz/ 8-bit  | -     2082 us   -0.0416%     | -       29 ms  -    117 us    -1.75 cyc
+16kHz/ 8-bit  | -    11358 us   -0.2272%     | -       20 ms  -     81 us    -1.30 cyc
+ 1kHz/ 9-bit  | -   393104 us   -7.8621%     |        943 ms      3775 us     3.77 cyc
+ 2kHz/ 9-bit  | -   137623 us   -2.7525%     | -      135 ms  -    541 us    -1.08 cyc
+ 3kHz/ 9-bit  | -    60022 us   -1.2004%     | -        6 ms  -     24 us    -0.07 cyc
+ 4kHz/ 9-bit  | -    17414 us   -0.3483%     | -      174 ms  -    699 us    -2.80 cyc
+ 5kHz/ 9-bit  | -    94084 us   -1.8817%     |        230 ms       922 us     4.61 cyc
+ 6kHz/ 9-bit  | -    59795 us   -1.1959%     |        397 ms      1590 us     9.54 cyc
+ 7kHz/ 9-bit  | -    35985 us   -0.7197%     |        172 ms       689 us     4.82 cyc
+ 8kHz/ 9-bit  | -    17474 us   -0.3495%     |        386 ms      1544 us    12.35 cyc
+ 9kHz/ 9-bit  | -     3782 us   -0.0756%     |        703 ms      2813 us    25.32 cyc
+10kHz/ 9-bit  | -    43030 us   -0.8606%     |       1425 ms      5703 us    57.03 cyc
+11kHz/ 9-bit  | -    29598 us   -0.5920%     |        841 ms      3364 us    37.00 cyc
+12kHz/ 9-bit  | -    17993 us   -0.3599%     |        354 ms      1418 us    17.02 cyc
+13kHz/ 9-bit  | -     7603 us   -0.1521%     | -       56 ms  -    226 us    -2.94 cyc
+14kHz/ 9-bit  | -    36044 us   -0.7209%     |       1531 ms      6124 us    85.74 cyc
+15kHz/ 9-bit  | -    25411 us   -0.5082%     |       3501 ms     14007 us   210.10 cyc
+16kHz/ 9-bit  | -    17531 us   -0.3506%     |       2969 ms     11878 us   190.05 cyc
+ 1kHz/10-bit  | -   899822 us  -17.9964%     |        113 ms       452 us     0.45 cyc
+ 2kHz/10-bit  | -   388239 us   -7.7648%     | -      135 ms  -    540 us    -1.08 cyc
+ 3kHz/10-bit  | -   217656 us   -4.3531%     | -       38 ms  -    155 us    -0.47 cyc
+ 4kHz/10-bit  | -   132653 us   -2.6531%     | -      182 ms  -    728 us    -2.91 cyc
+ 5kHz/10-bit  | -    89284 us   -1.7857%     | -      154 ms  -    617 us    -3.08 cyc
+ 6kHz/10-bit  | -    55716 us   -1.1143%     |          8 ms        34 us     0.20 cyc
+ 7kHz/10-bit  | -    31132 us   -0.6226%     | -      132 ms  -    531 us    -3.72 cyc
+ 8kHz/10-bit  | -    12595 us   -0.2519%     | -       81 ms  -    327 us    -2.62 cyc
+ 9kHz/10-bit  | -   112548 us   -2.2510%     |        153 ms       615 us     5.54 cyc
+10kHz/10-bit  | -    89330 us   -1.7866%     |        155 ms       623 us     6.23 cyc
+11kHz/10-bit  | -    71236 us   -1.4247%     |        159 ms       638 us     7.02 cyc
+12kHz/10-bit  | -    54242 us   -1.0848%     |        356 ms      1426 us    17.11 cyc
+13kHz/10-bit  | -    43614 us   -0.8723%     | -       58 ms  -    232 us    -3.02 cyc
+14kHz/10-bit  | -    29426 us   -0.5885%     |        233 ms       935 us    13.09 cyc
+15kHz/10-bit  | -    22437 us   -0.4487%     |        677 ms      2709 us    40.64 cyc
+16kHz/10-bit  | -    12642 us   -0.2528%     |        323 ms      1295 us    20.72 cyc
+ 1kHz/11-bit  | -   212821 us   -4.2564%     |        113 ms       452 us     0.45 cyc
+ 2kHz/11-bit  | -   214223 us   -4.2845%     | -      135 ms  -    540 us    -1.08 cyc
+ 3kHz/11-bit  | -   215393 us   -4.3079%     | -      135 ms  -    542 us    -1.63 cyc
+ 4kHz/11-bit  | -    44640 us   -0.8928%     | -      182 ms  -    729 us    -2.92 cyc
+ 5kHz/11-bit  | -    78883 us   -1.5777%     | -      150 ms  -    602 us    -3.01 cyc
+ 6kHz/11-bit  | -   100729 us   -2.0146%     | -      341 ms  -   1367 us    -8.20 cyc
+ 7kHz/11-bit  | -    18943 us   -0.3789%     | -      250 ms  -   1002 us    -7.01 cyc
+ 8kHz/11-bit  | -    44843 us   -0.8969%     | -      225 ms  -    900 us    -7.20 cyc
+ 9kHz/11-bit  | -    72006 us   -1.4401%     | -       40 ms  -    160 us    -1.44 cyc
+10kHz/11-bit  | -    18421 us   -0.3684%     | -      114 ms  -    456 us    -4.56 cyc
+11kHz/11-bit  | -    37608 us   -0.7522%     | -       99 ms  -    399 us    -4.39 cyc
+12kHz/11-bit  | -    54652 us   -1.0930%     |         14 ms        58 us     0.70 cyc
+13kHz/11-bit  | -    14776 us   -0.2955%     | -       58 ms  -    232 us    -3.02 cyc
+14kHz/11-bit  | -    30354 us   -0.6071%     | -      128 ms  -    515 us    -7.21 cyc
+15kHz/11-bit  | -    38884 us   -0.7777%     | -       98 ms  -    395 us    -5.92 cyc
+16kHz/11-bit  | -    10098 us   -0.2020%     | -       73 ms  -    294 us    -4.70 cyc
+ 1kHz/12-bit  | -    73756 us   -1.4751%     |        113 ms       452 us     0.45 cyc
+ 2kHz/12-bit  | -    75731 us   -1.5146%     | -      135 ms  -    540 us    -1.08 cyc
+ 3kHz/12-bit  | -    75588 us   -1.5118%     | -      300 ms  -   1203 us    -3.61 cyc
+ 4kHz/12-bit  | -    76890 us   -1.5378%     | -      197 ms  -    791 us    -3.16 cyc
+ 5kHz/12-bit  | -    77283 us   -1.5457%     | -      320 ms  -   1281 us    -6.41 cyc
+ 6kHz/12-bit  | -    79395 us   -1.5879%     | -      233 ms  -    935 us    -5.61 cyc
+ 7kHz/12-bit  | -    79435 us   -1.5887%     | -      253 ms  -   1015 us    -7.11 cyc
+ 8kHz/12-bit  | -    77618 us   -1.5524%     | -      225 ms  -    900 us    -7.20 cyc
+ 9kHz/12-bit  | -    73651 us   -1.4730%     | -      318 ms  -   1275 us   -11.48 cyc
+10kHz/12-bit  |       4209 us    0.0842%     | -      215 ms  -    861 us    -8.61 cyc
+11kHz/12-bit  |       1846 us    0.0369%     | -      198 ms  -    792 us    -8.71 cyc
+12kHz/12-bit  | -     5462 us   -0.1092%     | -      359 ms  -   1437 us   -17.24 cyc
+13kHz/12-bit  | -     9698 us   -0.1940%     | -      210 ms  -    841 us   -10.93 cyc
+14kHz/12-bit  | -    21307 us   -0.4261%     | -      281 ms  -   1126 us   -15.76 cyc
+15kHz/12-bit  | -    28201 us   -0.5640%     | -      295 ms  -   1183 us   -17.75 cyc
+16kHz/12-bit  | -    18630 us   -0.3726%     | -      249 ms  -    996 us   -15.94 cyc
+ 1kHz/13-bit  |    3199269 us   63.9854%     |        105 ms       421 us     0.42 cyc
+ 2kHz/13-bit  | -   437231 us   -8.7446%     | -      135 ms  -    540 us    -1.08 cyc
+ 3kHz/13-bit  | -   137262 us   -2.7452%     | -      220 ms  -    882 us    -2.65 cyc
+ 4kHz/13-bit  | -   211890 us   -4.2378%     | -      260 ms  -   1040 us    -4.16 cyc
+ 5kHz/13-bit  | -    75833 us   -1.5167%     | -      285 ms  -   1141 us    -5.71 cyc
+ 6kHz/13-bit  | -   132984 us   -2.6597%     | -      338 ms  -   1355 us    -8.13 cyc
+ 7kHz/13-bit  | -    52303 us   -1.0461%     | -      302 ms  -   1208 us    -8.46 cyc
+ 8kHz/13-bit  | -    91459 us   -1.8292%     | -      346 ms  -   1384 us   -11.07 cyc
+ 9kHz/13-bit  | -    32063 us   -0.6413%     | -      318 ms  -   1275 us   -11.48 cyc
+ 1kHz/14-bit  |     466366 us    9.3273%     |        105 ms       421 us     0.42 cyc
+ 2kHz/14-bit  |    3200171 us   64.0034%     | -      143 ms  -    573 us    -1.15 cyc
+ 3kHz/14-bit  |     471198 us    9.4240%     | -      305 ms  -   1223 us    -3.67 cyc
+ 4kHz/14-bit  | -   878583 us  -17.5717%     | -      307 ms  -   1231 us    -4.92 cyc
+===========================================

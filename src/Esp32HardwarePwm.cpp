@@ -773,22 +773,29 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 		// Guard: when cycle_num == 0 the requested time is below the hardware
 		// minimum (LEDC would clamp to 1 cycle giving actual > requested).
 		// That is not a truncation artefact we can fix with carry, so skip.
+		//
+		// Additionally, the correction unit is "one extra LEDC cycle" =
+		//   extra_cycle_us = range × 1_000_000/freq  µs.
+		// When range is large and freq is low this can be hundreds of
+		// milliseconds — larger than the fade itself.  Applying carry in that
+		// regime produces multi-ms jumps every N cycles (very visible glitches).
+		// Only accumulate when the unit is ≤ 5 ms, where corrections are fine-
+		// grained enough to be useful and safe.
+		static constexpr uint32_t MAX_QUANT_UNIT_US = 5000; // 5 ms
 		if(freq > 0 && range > 0) {
 			uint64_t cycle_num = (freq * (uint64_t)entry.fadeTimeMs) / (1000ULL * range);
-			if(cycle_num > 0) {
+			// One extra LEDC cycle = range × 1_000_000/freq µs.
+			uint32_t extra_cycle_us = (uint32_t)(((uint64_t)range * 1000000ULL) / freq);
+			if(cycle_num > 0 && extra_cycle_us > 0 && extra_cycle_us <= MAX_QUANT_UNIT_US) {
 				uint64_t t_us = (uint64_t)entry.fadeTimeMs * 1000ULL;
 				uint64_t t_actual_us = (cycle_num * (uint64_t)range * 1000000ULL) / freq;
 				int32_t undershoot = (int32_t)(t_us - t_actual_us); // µs, ≥ 0
 				q.quantCarryUs += undershoot;
 
-				// One extra LEDC cycle = range × 1_000_000/freq µs.
-				uint32_t extra_cycle_us = (uint32_t)(((uint64_t)range * 1000000ULL) / freq);
-				if(extra_cycle_us > 0) {
-					while(q.quantCarryUs >= (int32_t)extra_cycle_us) {
-						q.quantCarryUs -= (int32_t)extra_cycle_us;
-						uint32_t addMs = extra_cycle_us / 1000;
-						entry.fadeTimeMs += (addMs > 0) ? addMs : 1;
-					}
+				while(q.quantCarryUs >= (int32_t)extra_cycle_us) {
+					q.quantCarryUs -= (int32_t)extra_cycle_us;
+					uint32_t addMs = extra_cycle_us / 1000;
+					entry.fadeTimeMs += (addMs > 0) ? addMs : 1;
 				}
 			}
 		}
