@@ -273,24 +273,50 @@ void runConfig(size_t idx)
 static constexpr const char* kSocName = _HWPWM_SOC_STR(SMING_SOC);
 
 /**
- * @brief Returns true when LEDC cannot represent the requested micro-fade step.
+ * @brief Returns true when the CH1 measurement cannot be used for calibration.
  *
- * The LEDC hardware needs at least one timer cycle per duty step.  A full-range
- * fade (0 → max_duty) over MICROFADE_MS requires:
- *   cycle_num = freq × MICROFADE_MS / (1000 × max_duty) >= 1
+ * The ESP-IDF ledc_set_fade_time_and_start path (simplified):
+ *   total_cycles = fade_time_ms × freq / 1000
+ *   if total_cycles > duty_delta:
+ *       scale=1, cycle_num=total_cycles/duty_delta  → actual ≈ requested  (accurate)
+ *   else:
+ *       cycle_num=1, scale=duty_delta/total_cycles
+ *       if scale >= 2: actual ≈ (duty_delta/scale)/freq ≈ requested        (usable)
+ *       if scale == 1: actual = duty_delta/freq  (FIXED, unaffected by requested)
  *
- * When max_duty > freq × MICROFADE_MS / 1000 the hardware clamps cycle_num=1
- * and the actual step duration = max_duty / freq, which is longer than
- * MICROFADE_MS.  The measured latPerStep residual then captures that hardware
- * overshoot rather than OS reload overhead and must not be used in the
- * calibration table (it is step-duration-specific, not a fixed overhead).
+ * The library deducts its overhead estimate before calling LEDC, so the actual
+ * LEDC fade_time is roughly MICROFADE_MS - formula_overhead ≈ MICROFADE_MS - 2ms.
+ * Integer-ms rounding means the actual call alternates between N and N+1 ms;
+ * if that ±1ms straddles a scale=1/scale=2 boundary the timing becomes erratic.
+ *
+ * This function probes both ±1ms boundary values and flags the config as
+ * hw-limited if either boundary yields scale == 1.
  */
 static bool isHwLimitedMicrofade(uint32_t freq, ledc_timer_bit_t res)
 {
-    uint32_t maxDuty       = (1u << (uint8_t)res) - 1;
-    uint32_t minCyclesReqd = (uint32_t)(maxDuty);          // one cycle per step needed
-    uint32_t totalCycles   = freq * MICROFADE_MS / 1000;   // timer cycles in one step
-    return totalCycles < minCyclesReqd;
+    uint32_t maxDuty = (1u << (uint8_t)res) - 1;
+    if(maxDuty == 0 || freq == 0)
+        return true;
+
+    // Approximate adjusted fade time (after library deducts formula overhead).
+    static constexpr uint32_t DISPATCH_US = 1500;
+    uint32_t overheadUs = DISPATCH_US + 1000000u / freq;
+    uint32_t overheadMs = overheadUs / 1000;
+    if(overheadMs + 2 >= MICROFADE_MS)
+        return true;
+
+    // Probe both integer-ms values the library might pass to LEDC (±1ms).
+    for(int delta = -1; delta <= 0; ++delta) {
+        uint32_t adjMs = MICROFADE_MS - overheadMs + (uint32_t)delta;
+        uint32_t cyl   = freq * adjMs / 1000;
+        if(cyl == 0)
+            return true;
+        if(cyl >= maxDuty)
+            continue;                         // scale=1, cycle_num≥1: accurate
+        if((maxDuty / cyl) < 2)
+            return true;                      // scale=1: actual time fixed at maxDuty/freq
+    }
+    return false;
 }
 
 void printTable()
@@ -328,7 +354,8 @@ void printTable()
                       hwLim ? "  [hw-limited]" : "");
     }
     Serial.println(_F("==========================================="));
-    Serial.println(_F("* = LEDC hw minimum step > MICROFADE_MS; CH1 residual is NOT pure OS overhead"));
+    Serial.println(_F("* = IDF scale==1 at adjusted fade time: actual duration = maxDuty/freq"));
+    Serial.println(_F("    (fixed regardless of requested time, uncorrectable via calibration)"));
 
     // ---------------------------------------------------------------------------
     // Emit calibration header file to serial.
