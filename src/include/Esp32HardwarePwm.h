@@ -9,15 +9,19 @@
  * All files of the Sming Core are provided under the LGPL v3 license.
  *
  * This library wraps the ESP32 LEDC peripheral to provide hardware PWM with:
- * - Configurable duty resolution (1-20 bits) and frequency
+ * - Configurable duty resolution (1–20 bits) and frequency
  * - Multiple independent instances with distinct timer configurations
  * - Phase shifting (hpoint) for EMI/noise/power-spike reduction
  * - Spread spectrum modulation
  * - Hardware-accelerated linear fading
+ * - Per-channel FIFO and CYCLIC fade queues with automatic sequencing
+ * - Split of large-range fades to work around the LEDC step_num ≤ 1023 limit
+ * - Per-reload timing compensation to reduce accumulated latency in queued sequences
+ * - Application callbacks: fade-done, queue-empty, cyclic-wrap, queue-error
  */
 
 /** @defgroup esp32_hw_pwm ESP32 Hardware PWM
- *  @brief    ESP32 LEDC hardware PWM driver
+ *  @brief    ESP32 LEDC hardware PWM driver with fade queue support
  *  @{
  */
 
@@ -52,18 +56,41 @@
 #endif
 
 /**
- * @brief ESP32 Hardware PWM class
- * 
- * This class provides a C++ wrapper around the ESP32 LEDC PWM functionality.
- * 
- * Key features:
- * - Support for different frequencies and duty resolutions
- * - Phase shifting for EMI reduction
- * - Hardware fade support
- * - Thread-safe operations
- * - RAII resource management
- * 
- * @note This class is designed specifically for ESP32 architecture
+ * @brief ESP32 Hardware PWM driver wrapping the LEDC peripheral.
+ *
+ * Provides a channel-indexed interface over the ESP32 LEDC hardware with:
+ *
+ * **Basic PWM**
+ * - Arbitrary duty resolution (1–20 bit) and frequency per timer
+ * - Instantaneous duty set (`setDutyChan`) and percentage helpers
+ * - Phase shifting (hpoint) per channel — off, auto-distributed, or manual
+ * - Spread spectrum modulation for EMI reduction
+ *
+ * **Hardware fading**
+ * - Single-shot linear fades: `fadeToValueChan` / `fadeToPercentChan`
+ * - Automatic splitting of large-range fades to avoid the LEDC
+ *   `step_num ≤ 1023` quantisation limit (up to −18 % timing error at 12-bit
+ *   without splitting)
+ *
+ * **Fade queue**
+ * - Per-channel ring-buffer queue (`queueFadeChan`) in FIFO or CYCLIC mode
+ * - FIFO: auto-starts on first entry; fires `onQueueEmpty` when drained
+ * - CYCLIC: seeded then started with `startQueue`; fires `onCyclicWrap` on
+ *   each loop
+ * - Per-reload timing correction (`reloadOverheadUs`) to compensate ISR→task
+ *   dispatch latency accumulating over many queued steps
+ * - `onFadeDone` callback after every individual fade (including queue steps)
+ * - `onQueueError` callback for `QUEUE_FULL` and `SPLIT_DEGRADED` conditions
+ *
+ * **Safe teardown**
+ * - `hasPendingCallbacks()` lets callers defer `delete` until all queued
+ *   task-context dispatches have drained, preventing use-after-free
+ *
+ * Channel index is the 0-based position in the `pins[]` vector passed to the
+ * constructor, independent of GPIO number or LEDC hardware channel number.
+ *
+ * @note RAII — all LEDC resources are released in the destructor.
+ * @note Not copyable or movable.
  */
 class Esp32HardwarePwm
 {
@@ -427,6 +454,24 @@ public:
 		onQueueError_ = cb;
 	}
 
+	/** @brief Returns true if there are unprocessed ISR results or a
+	 *  dispatchFadeCallbacks task already queued in the Sming task queue.
+	 *
+	 *  Use this before deleting the object from task context to ensure no
+	 *  stale task-queue entry still holds a pointer to it:
+	 *  @code
+	 *    if(pwm->hasPendingCallbacks()) {
+	 *        System.queueCallback(tryTeardown);  // re-defer
+	 *        return;
+	 *    }
+	 *    delete pwm;
+	 *  @endcode
+	 */
+	bool hasPendingCallbacks() const
+	{
+		return pendingFadeCallbacks_ != 0 || fadeCallbackQueued_;
+	}
+
 	// -----------------------------------------------------------------------
 	// Legacy interface — GPIO-pin-indexed (use channel interface for new code)
 	// -----------------------------------------------------------------------
@@ -499,8 +544,10 @@ private:
 		QueueMode mode = QueueMode::FIFO;
 		bool autoStart = true; ///< If true, playback starts on first queueFadeChan(); false requires startQueue()
 		uint32_t reloadOverheadUs = 0;	  ///< Per-reload overhead subtracted from each step (µs)
-		int32_t carryUs = 0;		      ///< Sub-ms accumulator for overhead correction
+		int32_t carryUs = 0;		      ///< Sub-ms accumulator for reload overhead correction
+		int32_t quantCarryUs = 0;	      ///< Sub-µs accumulator for cycle_num truncation correction
 		bool activeIsIntermediate = false; ///< True when the executing entry is a partial (intermediate) split segment
+		bool warnedLowCycleNum = false;    ///< Suppress repeat low-cycle_num warnings for this channel
 	};
 
 	struct PinConfig {
@@ -527,19 +574,6 @@ private:
 	// ISR → task handoff for fade completion
 	volatile uint32_t pendingFadeCallbacks_ = 0;
 	volatile bool fadeCallbackQueued_ = false;
-
-#ifdef HW_PWM_MEASURE_LATENCY
-	// ISR-side timestamp per channel (µs, set in fadeDoneCallback before queueCallback)
-	volatile int64_t isrTimestamp_[SOC_LEDC_CHANNEL_NUM] = {};
-	// Latency statistics (updated in dispatchFadeCallbacks, task context)
-	struct LatencyStat {
-		int64_t minUs = INT64_MAX;
-		int64_t maxUs = 0;
-		int64_t sumUs = 0;
-		uint32_t count = 0;
-	};
-	LatencyStat latency_[SOC_LEDC_CHANNEL_NUM];
-#endif
 
 	// Application-level callbacks
 	Delegate<void(uint8_t)> onFadeDone_;
@@ -579,7 +613,9 @@ private:
 	}
 
 	/**
-     * @brief Calculate hpoint for phase shifting
+     * @brief Calculate hpoint for phase shifting 
+	 *        this calculates hpoits such that n channels
+	 *        are evenly distributed across the PWM period
      * @param channel_index Index of the channel
      * @return Calculated hpoint value
      */

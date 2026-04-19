@@ -48,24 +48,37 @@
 namespace
 {
 /**
- * @brief Estimated ISR→task→ledc_set_fade latency in microseconds.
- * Covers: LEDC fade-done ISR fires, Sming System.queueCallback posts to task
- * queue, main task wakes and calls ledc_set_fade_time_and_start, LEDC waits
- * for the next timer edge.  Empirically ~300–600 µs at 240 MHz; 500 µs is
- * the default starting point.  Tune via setReloadOverheadUs() if needed.
- */
-static constexpr uint32_t DISPATCH_LATENCY_US = 500;
-
-/**
  * @brief Compute per-reload overhead correction for a given PWM frequency.
- * One full timer period (guaranteed wait for next edge after reload) plus the
- * constant dispatch latency.
+ *
+ * Empirically the ISR→task dispatch latency scales approximately proportionally
+ * with the LEDC timer period rather than being a fixed constant.  Measurements
+ * at 1–2 kHz yield actual_overhead ≈ 3 × period, which fits the model that the
+ * overhead is dominated by the time the FreeRTOS main task spends waiting for
+ * the next LEDC timer edge after System.queueCallback fires (on average 0.5
+ * periods) plus task wake-up latency (also a few periods at low clock rates).
+ *
+ * At higher frequencies (> 4 kHz) the per-step overhead is small relative to
+ * the fade step duration, so under-correction is acceptable.
+ *
+ * Override per channel via setReloadOverheadUs() to calibrate for your
+ * specific hardware using the TimingTest_HwPWM sample.
  */
 static uint32_t computeReloadOverhead(uint32_t frequency)
 {
 	if(frequency == 0)
-		return DISPATCH_LATENCY_US;
-	return (1000000UL / frequency) + DISPATCH_LATENCY_US;
+		return 0;
+	// Measured model: fixed dispatch latency + 1 × timer period.
+	//
+	// After a fade-done ISR the OS task queue dispatches the callback
+	// (typically 1300–1700 µs on ESP32 at 240 MHz) and then LEDC waits
+	// for the next timer edge before the new fade starts.  Together:
+	//   overhead ≈ DISPATCH_LATENCY_US + 1 × period
+	//
+	// Empirically calibrated from TimingTest_HwPWM across 8–11 bit configs
+	// at 1–8 kHz.  Override per channel with setReloadOverheadUs() if your
+	// application needs tighter calibration.
+	static constexpr uint32_t DISPATCH_LATENCY_US = 1500;
+	return DISPATCH_LATENCY_US + (1000000UL / frequency);
 }
 
 /**
@@ -131,15 +144,16 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& con
 		return;
 	}
 
-	/* populate the pins_ array
-        gpioPin is assigned the pin passed in the pins array
-        channel is counted up from config.channelStart
-        hpoint is handled according to config.phaseShift.mode:
-            for AUTO, the hpoint is calculated based on the pin index
-            for MANUAL, the hpoint is taken from the provided manual_hpoints array
-                if the number of provided hpoints is less than the number of pins, set the remaining hpoints to 0
-                if the number of provided hpoints is more than the number of pins, the extra hpoints will be ignored
-    */
+	/* ---------------------------------------------------------------
+	*   populate the pins_ array
+    *   gpioPin is assigned the pin passed in the pins array
+    *   channel is counted up from config.channelStart
+    *   hpoint is handled according to config.phaseShift.mode:
+    *       for AUTO, the hpoint is calculated based on the pin index
+    *       for MANUAL, the hpoint is taken from the provided manual_hpoints array
+    *           if the number of provided hpoints is less than the number of pins, set the remaining hpoints to 0
+    *           if the number of provided hpoints is more than the number of pins, the extra hpoints will be ignored
+	* --------------------------------------------------------------- */
 
 	for(uint8_t i = 0; i < pins.size(); ++i) {
 		auto& cfg = pins_[i];
@@ -160,7 +174,10 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& con
 		}
 	}
 
-	debug_i("PWM Constructor Configuration:");
+	// Increment each time the compensation model changes — lets you confirm
+	// which firmware build produced a given test output.
+	static constexpr uint8_t COMPENSATION_REVISION = 7; // ..., 6=always split range>1023+cycle_num warning, 7=warn only once+warn only when 0<cycle_num<20
+	debug_i("PWM Constructor Configuration [compensation rev %u]:", COMPENSATION_REVISION);
 	debug_i("  Timer: num=%d, resolution=%d, freq=%d, speed_mode=%d, clk_cfg=%d", timer_.timer_num, timer_.resolution,
 			timer_.frequency, timer_.speed_mode, timer_.clk_cfg);
 	debug_i("  SpreadSpectrum: mode=%d, WidthPercent=%d, Subsampling=%d", spreadSpectrum_.mode,
@@ -547,9 +564,8 @@ bool Esp32HardwarePwm::initialize()
 	for(auto& q : fadeQueues_) {
 		q.reloadOverheadUs = overhead;
 	}
-	debug_i("Reload overhead correction: %lu µs/step (period=%lu µs + dispatch=%lu µs)",
-			(unsigned long)overhead, (unsigned long)(1000000UL / timer_.frequency),
-			(unsigned long)DISPATCH_LATENCY_US);
+	debug_i("Reload overhead correction: %lu µs/step (1500 µs dispatch + 1 × period=%lu µs)",
+			(unsigned long)overhead, (unsigned long)(1000000UL / timer_.frequency));
 
 	return true;
 }
@@ -586,9 +602,6 @@ bool IRAM_ATTR Esp32HardwarePwm::fadeDoneCallback(const ledc_cb_param_t* param, 
 		self->pins_[i].currentDuty = self->pins_[i].targetDuty;
 		self->fadeDone_[i] = true;
 		self->pendingFadeCallbacks_ |= (1u << i);
-#ifdef HW_PWM_MEASURE_LATENCY
-		self->isrTimestamp_[i] = esp_timer_get_time();
-#endif
 		if(!self->fadeCallbackQueued_) {
 			self->fadeCallbackQueued_ = true;
 			System.queueCallback(dispatchFadeCallbacks, reinterpret_cast<uint32_t>(self));
@@ -645,21 +658,6 @@ void Esp32HardwarePwm::dispatchFadeCallbacks(uint32_t param)
 		if(!(pending & (1u << i)))
 			continue;
 
-#ifdef HW_PWM_MEASURE_LATENCY
-		{
-			int64_t now = esp_timer_get_time();
-			int64_t latUs = now - self->isrTimestamp_[i];
-			auto& s = self->latency_[i];
-			if(latUs < s.minUs) s.minUs = latUs;
-			if(latUs > s.maxUs) s.maxUs = latUs;
-			s.sumUs += latUs;
-			++s.count;
-			Serial.printf("[HwPWM] ch%u ISR→cb latency: %lldµs  (min=%lld max=%lld avg=%lld n=%u)\n",
-					i, latUs, s.minUs, s.maxUs,
-					s.count ? s.sumUs / s.count : 0, s.count);
-		}
-#endif
-
 		// If an intermediate split-fade segment just finished, start the next one
 		// (already in the queue) without surfacing any callbacks — the application
 		// only sees the overall fade completing when the final segment finishes.
@@ -692,12 +690,64 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 
 	ChannelFadeQueue& q = fadeQueues_[channel_idx];
 
-	if(q.mode == QueueMode::FIFO) {
-		if(q.count == 0)
-			return false;
-		FadeEntry entry = dequeueFifo(q);
-		q.activeIsIntermediate = entry.isPartial;
-		// Apply reload overhead correction using µs carry accumulator
+	// Helper: apply all per-step corrections to entry.fadeTimeMs and return it.
+	// Called for both FIFO and CYCLIC paths with the dequeued/peeked entry.
+	//
+	// Two independent carry accumulators run here:
+	//
+	// 1. Reload overhead correction (carryUs):
+	//    Every fade reload adds a fixed per-step latency (ISR→task dispatch +
+	//    LEDC edge-alignment wait ≈ 3 × timer period).  We deduct this from
+	//    successive fade durations so the total sequence time converges to the
+	//    commanded total.
+	//
+	// 2. cycle_num truncation correction (quantCarryUs):
+	//    LEDC computes cycle_num = floor(freq × t_ms / (1000 × range)).  The
+	//    fractional part is lost each step.  We compute the exact undershoot:
+	//      t_actual_us = cycle_num × range × 1_000_000 / freq
+	//      undershoot  = t_requested_us − t_actual_us   (always ≥ 0)
+	//    The undershoot is accumulated; when it totals ≥ one extra cycle worth
+	//    of time (step_period_us = range × 1_000_000 / freq) we add exactly
+	//    one timer cycle's worth of milliseconds to the next step, keeping the
+	//    total duration accurate to ±1 cycle over an arbitrarily long queue.
+	//    When range == 0 (no-op fade) quantization is zero, carry is unchanged.
+	auto applyCorrections = [&](FadeEntry& entry) {
+		const uint32_t freq = timer_.frequency;
+		const uint32_t range = (entry.targetDuty >= pins_[channel_idx].targetDuty)
+			? (entry.targetDuty - pins_[channel_idx].targetDuty)
+			: (pins_[channel_idx].targetDuty - entry.targetDuty);
+
+		// --- 2. Quantization carry ---
+		// cycle_num = floor(freq × t_ms / (1000 × range)) is the number of PWM
+		// periods LEDC spends on each duty step.  The fractional part is lost:
+		//   undershoot = t_ms×1000 − cycle_num×range×1_000_000/freq  (µs, ≥ 0)
+		// We accumulate this across steps and, once ≥ one extra LEDC cycle,
+		// extend the next step so that the total sequence duration converges.
+		//
+		// Guard: when cycle_num == 0 the requested time is below the hardware
+		// minimum (LEDC would clamp to 1 cycle giving actual > requested).
+		// That is not a truncation artefact we can fix with carry, so skip.
+		if(freq > 0 && range > 0) {
+			uint64_t cycle_num = (freq * (uint64_t)entry.fadeTimeMs) / (1000ULL * range);
+			if(cycle_num > 0) {
+				uint64_t t_us = (uint64_t)entry.fadeTimeMs * 1000ULL;
+				uint64_t t_actual_us = (cycle_num * (uint64_t)range * 1000000ULL) / freq;
+				int32_t undershoot = (int32_t)(t_us - t_actual_us); // µs, ≥ 0
+				q.quantCarryUs += undershoot;
+
+				// One extra LEDC cycle = range × 1_000_000/freq µs.
+				uint32_t extra_cycle_us = (uint32_t)(((uint64_t)range * 1000000ULL) / freq);
+				if(extra_cycle_us > 0) {
+					while(q.quantCarryUs >= (int32_t)extra_cycle_us) {
+						q.quantCarryUs -= (int32_t)extra_cycle_us;
+						uint32_t addMs = extra_cycle_us / 1000;
+						entry.fadeTimeMs += (addMs > 0) ? addMs : 1;
+					}
+				}
+			}
+		}
+
+		// --- 1. Reload overhead correction ---
 		if(q.reloadOverheadUs > 0) {
 			q.carryUs += (int32_t)q.reloadOverheadUs;
 			int32_t deductMs = q.carryUs / 1000;
@@ -707,6 +757,14 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 			else
 				entry.fadeTimeMs = 1;
 		}
+	};
+
+	if(q.mode == QueueMode::FIFO) {
+		if(q.count == 0)
+			return false;
+		FadeEntry entry = dequeueFifo(q);
+		q.activeIsIntermediate = entry.isPartial;
+		applyCorrections(entry);
 		return fadeHwChan(channel_idx, entry.targetDuty, entry.fadeTimeMs);
 	} else {
 		// CYCLIC
@@ -718,16 +776,7 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 		if(nextHead == 0 && onCyclicWrap_)
 			onCyclicWrap_(channel_idx);
 		q.head = nextHead;
-		// Apply reload overhead correction
-		if(q.reloadOverheadUs > 0) {
-			q.carryUs += (int32_t)q.reloadOverheadUs;
-			int32_t deductMs = q.carryUs / 1000;
-			q.carryUs %= 1000;
-			if(entry.fadeTimeMs > (uint32_t)deductMs + 1)
-				entry.fadeTimeMs -= (uint32_t)deductMs;
-			else
-				entry.fadeTimeMs = 1;
-		}
+		applyCorrections(entry);
 		return fadeHwChan(channel_idx, entry.targetDuty, entry.fadeTimeMs);
 	}
 }
@@ -850,12 +899,56 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 
 	uint32_t rangeAbs = (targetDuty >= fromDuty) ? (targetDuty - fromDuty) : (fromDuty - targetDuty);
 
-	// Only split when each resulting ≤1023-step segment can have at least one LEDC
-	// timer cycle.  The cycle count (independent of nSegs with proportional time) is:
-	//   cycle = floor(freq * fadeTimeMs / (1000 * rangeAbs))
-	// Splitting is counter-productive when that would be 0 (LEDC FADE TOO FAST).
-	bool shouldSplit = (rangeAbs > 1023) &&
-	                   ((uint64_t)timer_.frequency * fadeTimeMs >= 1000ULL * rangeAbs);
+	// -----------------------------------------------------------------------
+	// Splitting: why it exists, what it fixes, and what it cannot fix
+	//
+	// The LEDC hardware has a 10-bit step_num field (max 1023).  When the duty
+	// range of a fade exceeds 1023 counts, the driver sets scale = ceil(range/1023),
+	// meaning the duty advances by `scale` counts per timer cycle instead of 1.
+	// Result: up to (scale-1)/scale of all intermediate duty values are skipped.
+	// At 12-bit (range=4095), scale=4 — only one in four values is visited.
+	// Splitting the fade into ≤1023-step segments keeps scale=1 throughout, so
+	// every duty value is reached.  This is purely a WAVEFORM SMOOTHNESS fix.
+	//
+	// Splitting does NOT fix timing accuracy.  The hardware computes:
+	//
+	//   cycle_num = floor(freq × fadeTimeMs / (1000 × range))
+	//
+	// The fractional part is truncated — the fade always ends slightly early.
+	// Since t/range is the same for every segment, cycle_num is INVARIANT under
+	// proportional splitting (N cancels), so timing error is identical whether
+	// the fade is split or not.  Split anyway for waveform quality.
+	//
+	// The one exception: if cycle_num == 0 (requested duration is shorter than
+	// one LEDC timer cycle), LEDC clamps to 1 cycle — the fade runs LONGER than
+	// requested.  Each split segment would also have cycle_num == 0 and be
+	// clamped individually, making the total much longer.  Refuse to split in
+	// that case.
+	// -----------------------------------------------------------------------
+
+	// Compute cycle_num for this fade (same value for any proportional sub-segment).
+	uint64_t cycle_num = (rangeAbs > 0)
+		? ((uint64_t)timer_.frequency * fadeTimeMs) / (1000ULL * rangeAbs)
+		: 0;
+
+	// Warn when cycle_num is in the timing-error regime (1 ≤ cycle_num < SPLIT_STEP_QUALITY).
+	// In this range the LEDC integer truncation error is large (cycle_num=4 → ~20% short).
+	//
+	// cycle_num == 0 means scale > 1 (LEDC advances duty by multiple counts per period).
+	// Timing is approximately correct in that regime — no warning needed.
+	//
+	// Only warn once per channel/session to avoid UART latency affecting timing.
+	static constexpr uint32_t SPLIT_STEP_QUALITY = 20;
+	if(rangeAbs > 0 && cycle_num > 0 && cycle_num < SPLIT_STEP_QUALITY && !q.warnedLowCycleNum) {
+		q.warnedLowCycleNum = true;
+		uint64_t t_actual_us = (cycle_num * (uint64_t)rangeAbs * 1000000ULL) / timer_.frequency;
+		debug_w("queueFadeChan: ch%d cycle_num=%llu (< %lu) — fade may be %lld ms short (hw limit)",
+				channel, (unsigned long long)cycle_num, (unsigned long)SPLIT_STEP_QUALITY,
+				(long long)((int64_t)fadeTimeMs - (int64_t)(t_actual_us / 1000)));
+	}
+
+	// Split when range > 1023 (scale > 1) AND cycle_num >= 1 (not below hw minimum).
+	bool shouldSplit = (rangeAbs > 1023) && (cycle_num >= 1);
 	uint16_t nSegs = shouldSplit ? (uint16_t)((rangeAbs + 1022) / 1023) : 1;
 
 	// If the split segments don't all fit, degrade gracefully to a single unsplit

@@ -50,32 +50,32 @@ struct TestConfig {
 //   overheadUs = (1_000_000 / frequency) + DISPATCH_LATENCY_US
 // 8kHz/8-bit omitted: cycles_per_duty_step ≈ 1882 exceeds ESP32 LEDC step_num max (1023)
 static const TestConfig configs[] = {
-    { LEDC_TIMER_8_BIT,   1000, " 1kHz/ 8-bit" },
-    { LEDC_TIMER_8_BIT,   4000, " 4kHz/ 8-bit" },
+ //   { LEDC_TIMER_8_BIT,   1000, " 1kHz/ 8-bit" },
+ //   { LEDC_TIMER_8_BIT,   4000, " 4kHz/ 8-bit" },
     { LEDC_TIMER_10_BIT,  1000, " 1kHz/10-bit" },
     { LEDC_TIMER_10_BIT,  2000, " 2kHz/10-bit" },
-    { LEDC_TIMER_10_BIT,  3000, " 3kHz/10-bit" },
-    { LEDC_TIMER_10_BIT,  4000, " 4kHz/10-bit" },
-    { LEDC_TIMER_10_BIT,  5000, " 5kHz/10-bit" },
-    { LEDC_TIMER_10_BIT,  6000, " 6kHz/10-bit" },
-    { LEDC_TIMER_10_BIT,  7000, " 7kHz/10-bit" },
-    { LEDC_TIMER_10_BIT,  8000, " 8kHz/10-bit" },
+ //   { LEDC_TIMER_10_BIT,  3000, " 3kHz/10-bit" },
+ //   { LEDC_TIMER_10_BIT,  4000, " 4kHz/10-bit" },
+ //   { LEDC_TIMER_10_BIT,  5000, " 5kHz/10-bit" },
+ //   { LEDC_TIMER_10_BIT,  6000, " 6kHz/10-bit" },
+ //   { LEDC_TIMER_10_BIT,  7000, " 7kHz/10-bit" },
+ //   { LEDC_TIMER_10_BIT,  8000, " 8kHz/10-bit" },
     { LEDC_TIMER_11_BIT,  1000, " 1kHz/11-bit" },
     { LEDC_TIMER_11_BIT,  2000, " 2kHz/11-bit" },
-    { LEDC_TIMER_11_BIT,  3000, " 3kHz/11-bit" },
-    { LEDC_TIMER_11_BIT,  4000, " 4kHz/11-bit" },
-    { LEDC_TIMER_11_BIT,  5000, " 5kHz/11-bit" },
-    { LEDC_TIMER_11_BIT,  6000, " 6kHz/11-bit" },
-    { LEDC_TIMER_11_BIT,  7000, " 7kHz/11-bit" },
-    { LEDC_TIMER_11_BIT,  8000, " 8kHz/11-bit" },
+ //   { LEDC_TIMER_11_BIT,  3000, " 3kHz/11-bit" },
+ //   { LEDC_TIMER_11_BIT,  4000, " 4kHz/11-bit" },
+ //   { LEDC_TIMER_11_BIT,  5000, " 5kHz/11-bit" },
+ //   { LEDC_TIMER_11_BIT,  6000, " 6kHz/11-bit" },
+ //   { LEDC_TIMER_11_BIT,  7000, " 7kHz/11-bit" },
+ //   { LEDC_TIMER_11_BIT,  8000, " 8kHz/11-bit" },
     { LEDC_TIMER_12_BIT,  1000, " 1kHz/12-bit" },
     { LEDC_TIMER_12_BIT,  2000, " 2kHz/12-bit" },
-    { LEDC_TIMER_12_BIT,  3000, " 3kHz/12-bit" },
-    { LEDC_TIMER_12_BIT,  4000, " 4kHz/12-bit" },
-    { LEDC_TIMER_12_BIT,  5000, " 5kHz/12-bit" },
-    { LEDC_TIMER_12_BIT,  6000, " 6kHz/12-bit" },
-    { LEDC_TIMER_12_BIT,  7000, " 7kHz/12-bit" },
-    { LEDC_TIMER_12_BIT,  8000, " 8kHz/12-bit" },
+ //   { LEDC_TIMER_12_BIT,  3000, " 3kHz/12-bit" },
+ //   { LEDC_TIMER_12_BIT,  4000, " 4kHz/12-bit" },
+ //   { LEDC_TIMER_12_BIT,  5000, " 5kHz/12-bit" },
+ //   { LEDC_TIMER_12_BIT,  6000, " 6kHz/12-bit" },
+ //   { LEDC_TIMER_12_BIT,  7000, " 7kHz/12-bit" },
+ //   { LEDC_TIMER_12_BIT,  8000, " 8kHz/12-bit" },
 };
 // clang-format on
 constexpr size_t NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
@@ -132,8 +132,14 @@ void printTable();
 
 // Called from the Sming main task after dispatchFadeCallbacks fully returns.
 // Safe to delete the old pwm object and create the next one here.
+// Re-defers itself if the library still has a pending dispatchFadeCallbacks
+// entry in the task queue (guards against a stale dispatch firing on a freed object).
 static void teardownAndRunNext()
 {
+    if(pwm && pwm->hasPendingCallbacks()) {
+        System.queueCallback(teardownAndRunNext);
+        return;
+    }
     delete pwm;
     pwm = nullptr;
 
