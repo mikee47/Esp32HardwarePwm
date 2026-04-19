@@ -29,7 +29,7 @@ namespace
 // ---------------------------------------------------------------------------
 // Test parameters — shared across all configs
 // ---------------------------------------------------------------------------
-constexpr uint32_t TOTAL_FADE_MS         = 10000; ///< Total fade duration (ms) per run
+constexpr uint32_t TOTAL_FADE_MS         = 5000; ///< Total fade duration (ms) per run
 constexpr uint32_t MICROFADE_MS          = 20;    ///< Each micro-step duration (ms) — 50 Hz
 constexpr uint32_t TOTAL_STEPS           = TOTAL_FADE_MS / MICROFADE_MS; ///< 1000
 constexpr uint8_t  CH_SINGLE             = 0;     ///< Single long fade channel
@@ -42,43 +42,48 @@ constexpr uint8_t  MICROFADE_QUEUE_DEPTH = 20;    ///< FIFO depth for CH1
 struct TestConfig {
     ledc_timer_bit_t resolution;
     uint32_t         frequency;
-    const char*      label;
+    char             label[16]; ///< e.g. " 1kHz/ 8-bit"
 };
 
-// clang-format off
-// Reload overhead correction is computed automatically by the library:
-//   overheadUs = (1_000_000 / frequency) + DISPATCH_LATENCY_US
-// 8kHz/8-bit omitted: cycles_per_duty_step ≈ 1882 exceeds ESP32 LEDC step_num max (1023)
-static const TestConfig configs[] = {
- //   { LEDC_TIMER_8_BIT,   1000, " 1kHz/ 8-bit" },
- //   { LEDC_TIMER_8_BIT,   4000, " 4kHz/ 8-bit" },
-    { LEDC_TIMER_10_BIT,  1000, " 1kHz/10-bit" },
-    { LEDC_TIMER_10_BIT,  2000, " 2kHz/10-bit" },
- //   { LEDC_TIMER_10_BIT,  3000, " 3kHz/10-bit" },
- //   { LEDC_TIMER_10_BIT,  4000, " 4kHz/10-bit" },
- //   { LEDC_TIMER_10_BIT,  5000, " 5kHz/10-bit" },
- //   { LEDC_TIMER_10_BIT,  6000, " 6kHz/10-bit" },
- //   { LEDC_TIMER_10_BIT,  7000, " 7kHz/10-bit" },
- //   { LEDC_TIMER_10_BIT,  8000, " 8kHz/10-bit" },
-    { LEDC_TIMER_11_BIT,  1000, " 1kHz/11-bit" },
-    { LEDC_TIMER_11_BIT,  2000, " 2kHz/11-bit" },
- //   { LEDC_TIMER_11_BIT,  3000, " 3kHz/11-bit" },
- //   { LEDC_TIMER_11_BIT,  4000, " 4kHz/11-bit" },
- //   { LEDC_TIMER_11_BIT,  5000, " 5kHz/11-bit" },
- //   { LEDC_TIMER_11_BIT,  6000, " 6kHz/11-bit" },
- //   { LEDC_TIMER_11_BIT,  7000, " 7kHz/11-bit" },
- //   { LEDC_TIMER_11_BIT,  8000, " 8kHz/11-bit" },
-    { LEDC_TIMER_12_BIT,  1000, " 1kHz/12-bit" },
-    { LEDC_TIMER_12_BIT,  2000, " 2kHz/12-bit" },
- //   { LEDC_TIMER_12_BIT,  3000, " 3kHz/12-bit" },
- //   { LEDC_TIMER_12_BIT,  4000, " 4kHz/12-bit" },
- //   { LEDC_TIMER_12_BIT,  5000, " 5kHz/12-bit" },
- //   { LEDC_TIMER_12_BIT,  6000, " 6kHz/12-bit" },
- //   { LEDC_TIMER_12_BIT,  7000, " 7kHz/12-bit" },
- //   { LEDC_TIMER_12_BIT,  8000, " 8kHz/12-bit" },
-};
-// clang-format on
-constexpr size_t NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
+// Full test matrix: all valid (resolution, frequency) combinations for the
+// ESP32 LEDC peripheral with an 80 MHz clock source.
+//
+// Constraint: freq × 2^bits ≤ 80,000,000
+//   8–12 bit : 1–16 kHz all valid  (16k × 4096 = 65.5 MHz < 80 MHz)
+//   13-bit   : 1– 9 kHz valid      (9k  × 8192 = 73.7 MHz < 80 MHz)
+//   14-bit   : 1– 4 kHz valid      (4k  × 16384 = 65.5 MHz < 80 MHz)
+//
+// Configs are generated at runtime in buildConfigs() so the list stays
+// compact and the validity constraint is enforced in one place.
+static std::vector<TestConfig> configs;
+
+void buildConfigs()
+{
+    struct Band {
+        ledc_timer_bit_t res;
+        uint8_t          bits;
+        uint32_t         maxFreqHz;
+    };
+    static const Band bands[] = {
+        { LEDC_TIMER_8_BIT,   8,  16000 },
+        { LEDC_TIMER_9_BIT,   9,  16000 },
+        { LEDC_TIMER_10_BIT, 10,  16000 },
+        { LEDC_TIMER_11_BIT, 11,  16000 },
+        { LEDC_TIMER_12_BIT, 12,  16000 },
+        { LEDC_TIMER_13_BIT, 13,   9000 },
+        { LEDC_TIMER_14_BIT, 14,   4000 },
+    };
+    configs.clear();
+    for(const auto& b : bands) {
+        for(uint32_t f = 1000; f <= b.maxFreqHz; f += 1000) {
+            TestConfig cfg{};
+            cfg.resolution = b.res;
+            cfg.frequency  = f;
+            snprintf(cfg.label, sizeof(cfg.label), "%2ukHz/%2u-bit", (unsigned)(f / 1000), (unsigned)b.bits);
+            configs.push_back(cfg);
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Per-run result storage
@@ -89,8 +94,8 @@ struct TestResult {
     int64_t devCh1_us;     ///< Total CH1 deviation from expected (µs)
     int64_t latPerStep_us; ///< devCh1 / TOTAL_STEPS (µs)
 };
-static TestResult results[NUM_CONFIGS];
-static size_t     currentConfig = 0;
+static std::vector<TestResult> results;
+static size_t                  currentConfig = 0;
 
 // ---------------------------------------------------------------------------
 // Per-run mutable state
@@ -143,7 +148,7 @@ static void teardownAndRunNext()
     delete pwm;
     pwm = nullptr;
 
-    if(currentConfig < NUM_CONFIGS)
+    if(currentConfig < configs.size())
         runConfig(currentConfig);
     else
         printTable();
@@ -163,7 +168,7 @@ void onRunComplete()
     r.latPerStep_us = TOTAL_STEPS > 0 ? r.devCh1_us / (int64_t)TOTAL_STEPS : 0LL;
 
     Serial.printf("[%u/%u done] quant=%+lld us  reload=%+lld ms  lat/step=%+lld us\n",
-                  (unsigned)(currentConfig + 1), (unsigned)NUM_CONFIGS,
+                  (unsigned)(currentConfig + 1), (unsigned)configs.size(),
                   r.devCh0_us, r.devCh1_us / 1000LL, r.latPerStep_us);
 
     ++currentConfig;
@@ -184,7 +189,7 @@ void runConfig(size_t idx)
 {
     const TestConfig& cfg = configs[idx];
     Serial.printf("\n--- Config %u/%u: %s  (%lu x %lu ms) ---\n",
-                  (unsigned)(idx + 1), (unsigned)NUM_CONFIGS,
+                  (unsigned)(idx + 1), (unsigned)configs.size(),
                   cfg.label,
                   (unsigned long)TOTAL_STEPS, (unsigned long)MICROFADE_MS);
 
@@ -214,7 +219,7 @@ void runConfig(size_t idx)
         delete pwm;
         pwm = nullptr;
         ++currentConfig;
-        if(currentConfig < NUM_CONFIGS)
+        if(currentConfig < configs.size())
             runConfig(currentConfig);
         else
             printTable();
@@ -261,6 +266,33 @@ void runConfig(size_t idx)
 // ---------------------------------------------------------------------------
 // Print final comparison table
 // ---------------------------------------------------------------------------
+
+// Stringify SMING_SOC token (e.g. esp32, esp32c3, esp32s3) at compile time.
+#define _HWPWM_SOC_STR2(x) #x
+#define _HWPWM_SOC_STR(x)  _HWPWM_SOC_STR2(x)
+static constexpr const char* kSocName = _HWPWM_SOC_STR(SMING_SOC);
+
+/**
+ * @brief Returns true when LEDC cannot represent the requested micro-fade step.
+ *
+ * The LEDC hardware needs at least one timer cycle per duty step.  A full-range
+ * fade (0 → max_duty) over MICROFADE_MS requires:
+ *   cycle_num = freq × MICROFADE_MS / (1000 × max_duty) >= 1
+ *
+ * When max_duty > freq × MICROFADE_MS / 1000 the hardware clamps cycle_num=1
+ * and the actual step duration = max_duty / freq, which is longer than
+ * MICROFADE_MS.  The measured latPerStep residual then captures that hardware
+ * overshoot rather than OS reload overhead and must not be used in the
+ * calibration table (it is step-duration-specific, not a fixed overhead).
+ */
+static bool isHwLimitedMicrofade(uint32_t freq, ledc_timer_bit_t res)
+{
+    uint32_t maxDuty       = (1u << (uint8_t)res) - 1;
+    uint32_t minCyclesReqd = (uint32_t)(maxDuty);          // one cycle per step needed
+    uint32_t totalCycles   = freq * MICROFADE_MS / 1000;   // timer cycles in one step
+    return totalCycles < minCyclesReqd;
+}
+
 void printTable()
 {
     constexpr int64_t expectedUs = (int64_t)TOTAL_FADE_MS * 1000LL;
@@ -275,24 +307,93 @@ void printTable()
     Serial.println(_F("              | deviation      %% of total     | total dev ms  per step us  timer cyc"));
     Serial.println(_F("--------------|-------------------------------|---------------------------"));
 
-    for(size_t i = 0; i < NUM_CONFIGS; ++i) {
+    for(size_t i = 0; i < configs.size(); ++i) {
         const TestResult& r = results[i];
         if(!r.valid) {
             Serial.printf("%-13s | (skipped — init failed)\n", configs[i].label);
             continue;
         }
+        bool hwLim = isHwLimitedMicrofade(configs[i].frequency, configs[i].resolution);
         double pctCh0 = 100.0 * (double)r.devCh0_us / (double)expectedUs;
         // Timer cycles = per-step error / one timer period = latPerStep_us * freq / 1_000_000
         double cyclesDev = (double)r.latPerStep_us * (double)configs[i].frequency / 1000000.0;
-        Serial.printf("%-13s | %+9lld us  %+8.4f%%     | %+10lld ms  %+8lld us  %+7.2f cyc\n",
+        Serial.printf("%-13s%s| %+9lld us  %+8.4f%%     | %+10lld ms  %+8lld us  %+7.2f cyc%s\n",
                       configs[i].label,
+                      hwLim ? "*" : " ",
                       r.devCh0_us,
                       pctCh0,
                       r.devCh1_us / 1000LL,
                       r.latPerStep_us,
-                      cyclesDev);
+                      cyclesDev,
+                      hwLim ? "  [hw-limited]" : "");
     }
     Serial.println(_F("==========================================="));
+    Serial.println(_F("* = LEDC hw minimum step > MICROFADE_MS; CH1 residual is NOT pure OS overhead"));
+
+    // ---------------------------------------------------------------------------
+    // Emit calibration header file to serial.
+    //
+    // To apply calibration:
+    //   1. Capture the block between "---- copy from here ----" and
+    //      "---- copy to here ----" from the serial monitor.
+    //   2. Save it as:
+    //        Esp32HardwarePwm/src/calibration/HwPwmCalib_<soc>.h
+    //   3. Rebuild — component.mk detects the file and the library auto-installs
+    //      the table at startup (no application code changes needed).
+    //   4. Re-run TimingTest_HwPWM to verify CH1 deviation is near zero.
+    // ---------------------------------------------------------------------------
+    Serial.println();
+    Serial.println(_F("// ---- copy from here ----"));
+
+    // File banner
+    Serial.printf("// HwPwmCalib_%s.h\n", kSocName);
+    Serial.println(_F("// Auto-generated by TimingTest_HwPWM — do not edit manually."));
+    Serial.println(_F("// Re-run TimingTest_HwPWM to regenerate."));
+    Serial.println(_F("//"));
+    Serial.printf("// Copy to: Esp32HardwarePwm/src/calibration/HwPwmCalib_%s.h\n", kSocName);
+    Serial.println(_F("// and rebuild. The library detects and applies this table automatically."));
+    Serial.println();
+    Serial.println(_F("#pragma once"));
+    Serial.printf("#ifndef HWPWM_CALIB_%s_H\n", kSocName);
+    Serial.printf("#define HWPWM_CALIB_%s_H\n", kSocName);
+    Serial.println();
+    Serial.println(_F("// clang-format off"));
+    Serial.printf("static const Esp32HardwarePwm::CalibrationEntry hwpwmCalib_%s[] = {\n", kSocName);
+    Serial.println(_F("    // { frequency, resolution, overheadUs }"));
+
+    size_t entryCount = 0;
+    for(size_t i = 0; i < configs.size(); ++i) {
+        const TestResult& r = results[i];
+        if(!r.valid)
+            continue;
+        // Skip hardware-limited configs — their residual reflects LEDC duty clamping
+        // (cycle_num forced to 1), not fixed OS reload overhead.  The clamping error
+        // depends on the requested step duration and is not portable.
+        if(isHwLimitedMicrofade(configs[i].frequency, configs[i].resolution))
+            continue;
+        // Measured overhead = formula model + per-step residual (clamped to 0)
+        int64_t model    = 1500LL + 1000000LL / (int64_t)configs[i].frequency;
+        int64_t actual   = model + r.latPerStep_us;
+        uint32_t overhead = (actual > 0) ? (uint32_t)actual : 0;
+        Serial.printf("    { %5lu, LEDC_TIMER_%u_BIT, %5lu }, // %s\n",
+                      (unsigned long)configs[i].frequency,
+                      (unsigned)(uint8_t)configs[i].resolution,
+                      (unsigned long)overhead,
+                      configs[i].label);
+        ++entryCount;
+    }
+
+    Serial.println(_F("};"));
+    Serial.println(_F("// clang-format on"));
+    Serial.println();
+    Serial.printf("#define HWPWM_CALIB_TABLE hwpwmCalib_%s\n", kSocName);
+    Serial.printf("#define HWPWM_CALIB_COUNT (sizeof(hwpwmCalib_%s)/sizeof(hwpwmCalib_%s[0]))\n",
+                  kSocName, kSocName);
+    Serial.println();
+    Serial.printf("#endif // HWPWM_CALIB_%s_H\n", kSocName);
+    Serial.println(_F("// ---- copy to here ----"));
+    Serial.printf("// (%u entries; %u hw-limited configs excluded)\n",
+                  (unsigned)entryCount, (unsigned)(configs.size() - entryCount));
 }
 
 } // namespace
@@ -307,9 +408,12 @@ void init()
     Serial.printf("  Micro-step:   %lu ms  (%lu steps)\n",
                   (unsigned long)MICROFADE_MS, (unsigned long)TOTAL_STEPS);
     Serial.printf("  Queue depth:  %u\n", MICROFADE_QUEUE_DEPTH);
+    buildConfigs();
+    results.assign(configs.size(), TestResult{});
+
     Serial.printf("  Configs:      %u  (~%lu min total)\n\n",
-                  (unsigned)NUM_CONFIGS,
-                  (unsigned long)((NUM_CONFIGS * (TOTAL_FADE_MS + 10000)) / 60000));
+                  (unsigned)configs.size(),
+                  (unsigned long)((configs.size() * (TOTAL_FADE_MS + 10000)) / 60000));
 
     runConfig(0);
 }
