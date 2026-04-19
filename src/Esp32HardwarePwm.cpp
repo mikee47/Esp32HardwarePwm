@@ -48,6 +48,27 @@
 namespace
 {
 /**
+ * @brief Estimated ISR→task→ledc_set_fade latency in microseconds.
+ * Covers: LEDC fade-done ISR fires, Sming System.queueCallback posts to task
+ * queue, main task wakes and calls ledc_set_fade_time_and_start, LEDC waits
+ * for the next timer edge.  Empirically ~300–600 µs at 240 MHz; 500 µs is
+ * the default starting point.  Tune via setReloadOverheadUs() if needed.
+ */
+static constexpr uint32_t DISPATCH_LATENCY_US = 500;
+
+/**
+ * @brief Compute per-reload overhead correction for a given PWM frequency.
+ * One full timer period (guaranteed wait for next edge after reload) plus the
+ * constant dispatch latency.
+ */
+static uint32_t computeReloadOverhead(uint32_t frequency)
+{
+	if(frequency == 0)
+		return DISPATCH_LATENCY_US;
+	return (1000000UL / frequency) + DISPATCH_LATENCY_US;
+}
+
+/**
  * @brief Calculate maximum duty value for given resolution
  */
 uint32_t maxDutyForResolution(ledc_timer_bit_t resolution)
@@ -156,17 +177,24 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& con
 
 Esp32HardwarePwm::~Esp32HardwarePwm()
 {
-	if(fadeInstalled_) {
-		ledc_fade_func_uninstall();
-	}
-
 	if(initialized_) {
-		// Stop all channels
+		// Stop all channels FIRST — ledc_stop aborts any in-progress hardware fade,
+		// preventing the fade-done ISR from firing after this object is destroyed.
 		for(const auto& pin : pins_) {
 			if(pin.isActive) {
 				ledc_stop(timer_.speed_mode, pin.channel, 0);
 			}
 		}
+	}
+
+	if(fadeInstalled_) {
+		ledc_fade_func_uninstall();
+	}
+
+	if(initialized_) {
+		// Pause the timer before deconfiguring — ledc_timer_del rejects a
+		// still-running timer with ESP_ERR_INVALID_STATE.
+		ledc_timer_pause(timer_.speed_mode, timer_.timer_num);
 
 		ledc_timer_config_t timer_config = {
 			.speed_mode = timer_.speed_mode, .timer_num = timer_.timer_num, .deconfigure = true};
@@ -191,7 +219,12 @@ bool Esp32HardwarePwm::setFrequency(uint32_t frequency)
 
 	if(result == ESP_OK) {
 		timer_.frequency = frequency;
-		debug_i("Set frequency to %d Hz", frequency);
+		// Recompute per-reload overhead correction for the new frequency
+		uint32_t overhead = computeReloadOverhead(frequency);
+		for(auto& q : fadeQueues_) {
+			q.reloadOverheadUs = overhead;
+		}
+		debug_i("Set frequency to %d Hz (reload overhead now %lu µs)", frequency, (unsigned long)overhead);
 		return true;
 	} else {
 		debug_e("Failed to set frequency: %s", esp_err_to_name(result));
@@ -294,7 +327,6 @@ uint32_t Esp32HardwarePwm::getDutyChan(uint8_t channel)
 	if(!initialized_) {
 		return 0;
 	}
-	debug_i("Getting duty for channel %d", channel);
 	if(channel >= pins_.size()) {
 		return 0;
 	}
@@ -341,10 +373,10 @@ void Esp32HardwarePwm::disableFade()
 	}
 }
 
-bool Esp32HardwarePwm::fadeToValueChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms)
+bool Esp32HardwarePwm::fadeHwChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms)
 {
 	if(!initialized_ || !fadeInstalled_ || channel_idx >= pins_.size()) {
-		debug_e("fadeToValueChan: not initialized, fade not installed, or channel %d out of range", channel_idx);
+		debug_e("fadeHwChan: not initialized, fade not installed, or channel %d out of range", channel_idx);
 		return false;
 	}
 
@@ -358,10 +390,25 @@ bool Esp32HardwarePwm::fadeToValueChan(uint8_t channel_idx, uint32_t target_duty
 													fade_time_ms, LEDC_FADE_NO_WAIT);
 	if(result != ESP_OK) {
 		fadeDone_[channel_idx] = true;
-		debug_e("fadeToValueChan failed: %s", esp_err_to_name(result));
+		debug_e("fadeHwChan failed: %s", esp_err_to_name(result));
 		return false;
 	}
 	return true;
+}
+
+bool Esp32HardwarePwm::fadeToValueChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms)
+{
+	if(channel_idx >= pins_.size())
+		return false;
+	// Remember whether the channel is mid-fade before we clear the queue.
+	// queueFadeChan's auto-start only fires when the channel is idle, so if a
+	// fade was running we must force-start the new entry ourselves after enqueue.
+	bool wasFading = isFadingChan(channel_idx);
+	resetQueue(channel_idx);
+	bool ok = queueFadeChan(channel_idx, target_duty, fade_time_ms);
+	if(ok && wasFading)
+		startNextFade(channel_idx); // preempts in-progress hw fade on this channel only
+	return ok;
 }
 
 bool Esp32HardwarePwm::fadeToPercentChan(uint8_t channel_idx, float target_pct, uint32_t fade_time_ms)
@@ -494,6 +541,16 @@ bool Esp32HardwarePwm::initialize()
 	}
 
 	debug_i("Initialized PWM with %d pins", pins_.size());
+
+	// Auto-compute per-reload correction for all fade queues
+	uint32_t overhead = computeReloadOverhead(timer_.frequency);
+	for(auto& q : fadeQueues_) {
+		q.reloadOverheadUs = overhead;
+	}
+	debug_i("Reload overhead correction: %lu µs/step (period=%lu µs + dispatch=%lu µs)",
+			(unsigned long)overhead, (unsigned long)(1000000UL / timer_.frequency),
+			(unsigned long)DISPATCH_LATENCY_US);
+
 	return true;
 }
 
@@ -529,6 +586,9 @@ bool IRAM_ATTR Esp32HardwarePwm::fadeDoneCallback(const ledc_cb_param_t* param, 
 		self->pins_[i].currentDuty = self->pins_[i].targetDuty;
 		self->fadeDone_[i] = true;
 		self->pendingFadeCallbacks_ |= (1u << i);
+#ifdef HW_PWM_MEASURE_LATENCY
+		self->isrTimestamp_[i] = esp_timer_get_time();
+#endif
 		if(!self->fadeCallbackQueued_) {
 			self->fadeCallbackQueued_ = true;
 			System.queueCallback(dispatchFadeCallbacks, reinterpret_cast<uint32_t>(self));
@@ -549,9 +609,26 @@ void Esp32HardwarePwm::handleSpreadSpectrum()
 	ledc_set_freq(timer_.speed_mode, timer_.timer_num, timer_.frequency + r);
 }
 
-// ---------------------------------------------------------------------------
-// Fade queue
-// ---------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------
+* Fade queue handling
+* 
+* implemented a per-channel fade queue system to allow sequencing multiple fades 
+* with different target values and durations without waiting for each fade to 
+* complete before issueing the next one. This is useful for creating complex 
+* fade patterns or responding to dynamic changes in desired brightness.
+*
+* during this work, it became obvious that the timing of led_c fade is not
+* precise for all combinations of PWM frequency, bit resolution and fade time.
+* also, there latency encured between one fade finishing, the led_c fade-done isr firing
+* the Sming event dispatch triggering the callback to enqueue the next fade.
+* this library tries to provide compensation for those timing issues by
+* - splitting long fades into multiple shorter segments that fit within the 
+*   reliable timing range, and automatically chaining them together in the queue 
+* - providing approximate compensation for the re-queue latency as measured on 
+*   specific hardware. Those compensation values can be calculated for other hardware
+*   using the TimingTest_HwPWM sample application and set via setReloadOverheadUs()
+* ---------------------------------------------------------------------------
+*/
 
 static_assert(SOC_LEDC_CHANNEL_NUM <= 32, "pendingFadeCallbacks_ bitmask too narrow for this SoC");
 
@@ -567,6 +644,29 @@ void Esp32HardwarePwm::dispatchFadeCallbacks(uint32_t param)
 	for(uint8_t i = 0; i < self->pins_.size(); ++i) {
 		if(!(pending & (1u << i)))
 			continue;
+
+#ifdef HW_PWM_MEASURE_LATENCY
+		{
+			int64_t now = esp_timer_get_time();
+			int64_t latUs = now - self->isrTimestamp_[i];
+			auto& s = self->latency_[i];
+			if(latUs < s.minUs) s.minUs = latUs;
+			if(latUs > s.maxUs) s.maxUs = latUs;
+			s.sumUs += latUs;
+			++s.count;
+			Serial.printf("[HwPWM] ch%u ISR→cb latency: %lldµs  (min=%lld max=%lld avg=%lld n=%u)\n",
+					i, latUs, s.minUs, s.maxUs,
+					s.count ? s.sumUs / s.count : 0, s.count);
+		}
+#endif
+
+		// If an intermediate split-fade segment just finished, start the next one
+		// (already in the queue) without surfacing any callbacks — the application
+		// only sees the overall fade completing when the final segment finishes.
+		if(self->fadeQueues_[i].activeIsIntermediate) {
+			self->startNextFade(i);
+			continue;
+		}
 
 		if(self->onFadeDone_)
 			self->onFadeDone_(i);
@@ -596,17 +696,39 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 		if(q.count == 0)
 			return false;
 		FadeEntry entry = dequeueFifo(q);
-		return fadeToValueChan(channel_idx, entry.targetDuty, entry.fadeTimeMs);
+		q.activeIsIntermediate = entry.isPartial;
+		// Apply reload overhead correction using µs carry accumulator
+		if(q.reloadOverheadUs > 0) {
+			q.carryUs += (int32_t)q.reloadOverheadUs;
+			int32_t deductMs = q.carryUs / 1000;
+			q.carryUs %= 1000;
+			if(entry.fadeTimeMs > (uint32_t)deductMs + 1)
+				entry.fadeTimeMs -= (uint32_t)deductMs;
+			else
+				entry.fadeTimeMs = 1;
+		}
+		return fadeHwChan(channel_idx, entry.targetDuty, entry.fadeTimeMs);
 	} else {
 		// CYCLIC
 		if(q.cycleLen == 0)
 			return false;
 		FadeEntry entry = q.entries[q.head];
+		q.activeIsIntermediate = entry.isPartial;
 		uint16_t nextHead = (q.head + 1) % q.cycleLen;
 		if(nextHead == 0 && onCyclicWrap_)
 			onCyclicWrap_(channel_idx);
 		q.head = nextHead;
-		return fadeToValueChan(channel_idx, entry.targetDuty, entry.fadeTimeMs);
+		// Apply reload overhead correction
+		if(q.reloadOverheadUs > 0) {
+			q.carryUs += (int32_t)q.reloadOverheadUs;
+			int32_t deductMs = q.carryUs / 1000;
+			q.carryUs %= 1000;
+			if(entry.fadeTimeMs > (uint32_t)deductMs + 1)
+				entry.fadeTimeMs -= (uint32_t)deductMs;
+			else
+				entry.fadeTimeMs = 1;
+		}
+		return fadeHwChan(channel_idx, entry.targetDuty, entry.fadeTimeMs);
 	}
 }
 
@@ -638,9 +760,12 @@ void Esp32HardwarePwm::resetQueue(uint8_t channel)
 {
 	if(channel >= pins_.size())
 		return;
-	size_t cap = fadeQueues_[channel].entries.size();
-	fadeQueues_[channel] = ChannelFadeQueue{};
-	fadeQueues_[channel].entries.resize(cap);
+	auto& q = fadeQueues_[channel];
+	size_t cap = q.entries.size();
+	uint32_t overhead = q.reloadOverheadUs; // preserve auto-computed correction
+	q = ChannelFadeQueue{};
+	q.entries.resize(cap);
+	q.reloadOverheadUs = overhead;
 }
 
 bool Esp32HardwarePwm::startQueue(uint8_t channel)
@@ -689,6 +814,21 @@ bool Esp32HardwarePwm::getQueueAutoStart(uint8_t channel) const
 	return fadeQueues_[channel].autoStart;
 }
 
+void Esp32HardwarePwm::setReloadOverheadUs(uint8_t channel, uint32_t overheadUs)
+{
+	if(channel >= pins_.size())
+		return;
+	fadeQueues_[channel].reloadOverheadUs = overheadUs;
+	fadeQueues_[channel].carryUs = 0; // reset carry when overhead changes
+}
+
+uint32_t Esp32HardwarePwm::getReloadOverheadUs(uint8_t channel) const
+{
+	if(channel >= pins_.size())
+		return 0;
+	return fadeQueues_[channel].reloadOverheadUs;
+}
+
 bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs)
 {
 	if(!initialized_ || !fadeInstalled_ || channel >= pins_.size()) {
@@ -697,26 +837,69 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 	}
 
 	ChannelFadeQueue& q = fadeQueues_[channel];
-	uint16_t capacity = (q.mode == QueueMode::FIFO) ? q.count : q.cycleLen;
-
-	if(capacity >= (uint16_t)q.entries.size()) {
-		debug_e("queueFadeChan: channel %d queue full (%d entries)", channel, capacity);
-		return false;
-	}
+	uint16_t currentCount = (q.mode == QueueMode::FIFO) ? q.count : q.cycleLen;
 
 	if(targetDuty > getMaxDuty())
 		targetDuty = getMaxDuty();
 
-	q.entries[q.tail] = {targetDuty, fadeTimeMs};
-	q.tail = (q.tail + 1) % (uint16_t)q.entries.size();
+	// Determine the duty level this entry will start from: the target of the
+	// last queued entry, or the channel's current target if the queue is empty.
+	uint32_t fromDuty = (currentCount > 0)
+		? q.entries[(q.tail == 0 ? (uint16_t)q.entries.size() : q.tail) - 1].targetDuty
+		: pins_[channel].targetDuty;
+
+	uint32_t rangeAbs = (targetDuty >= fromDuty) ? (targetDuty - fromDuty) : (fromDuty - targetDuty);
+
+	// Only split when each resulting ≤1023-step segment can have at least one LEDC
+	// timer cycle.  The cycle count (independent of nSegs with proportional time) is:
+	//   cycle = floor(freq * fadeTimeMs / (1000 * rangeAbs))
+	// Splitting is counter-productive when that would be 0 (LEDC FADE TOO FAST).
+	bool shouldSplit = (rangeAbs > 1023) &&
+	                   ((uint64_t)timer_.frequency * fadeTimeMs >= 1000ULL * rangeAbs);
+	uint16_t nSegs = shouldSplit ? (uint16_t)((rangeAbs + 1022) / 1023) : 1;
+
+	// If the split segments don't all fit, degrade gracefully to a single unsplit
+	// entry rather than silently failing.  The hardware will use scale≥2 with some
+	// timing error, but the fade will still execute.
+	if(nSegs > 1 && currentCount + nSegs > (uint16_t)q.entries.size()) {
+		if(currentCount + 1 <= (uint16_t)q.entries.size()) {
+			debug_w("queueFadeChan: ch%d split (%d segs) won't fit, falling back to unsplit", channel, nSegs);
+			if(onQueueError_)
+				onQueueError_(channel, QueueError::SPLIT_DEGRADED);
+			nSegs = 1;
+		} else {
+			debug_d("queueFadeChan: channel %d queue full (%d entries, need %d slots)",
+					channel, currentCount, nSegs);
+			if(onQueueError_)
+				onQueueError_(channel, QueueError::QUEUE_FULL);
+			return false;
+		}
+	} else if(nSegs == 1 && currentCount + 1 > (uint16_t)q.entries.size()) {
+		debug_d("queueFadeChan: channel %d queue full", channel);
+		if(onQueueError_)
+			onQueueError_(channel, QueueError::QUEUE_FULL);
+		return false;
+	}
+
+	int64_t totalRange = (int64_t)targetDuty - (int64_t)fromDuty;
+	for(uint16_t s = 0; s < nSegs; ++s) {
+		uint32_t segEnd = (uint32_t)((int64_t)fromDuty + totalRange * (s + 1) / nSegs);
+		uint32_t segStart = (uint32_t)((int64_t)fromDuty + totalRange * s / nSegs);
+		uint32_t segRange = (segEnd >= segStart) ? (segEnd - segStart) : (segStart - segEnd);
+		uint32_t segTimeMs = (rangeAbs > 0) ? (uint32_t)((uint64_t)fadeTimeMs * segRange / rangeAbs) : 1;
+		if(segTimeMs == 0)
+			segTimeMs = 1;
+		q.entries[q.tail] = {segEnd, segTimeMs, /*isPartial=*/(s < nSegs - 1)};
+		q.tail = (q.tail + 1) % (uint16_t)q.entries.size();
+	}
 
 	if(q.mode == QueueMode::FIFO)
-		++q.count;
+		q.count += nSegs;
 	else
-		++q.cycleLen;
+		q.cycleLen += nSegs;
 
-	// Auto-start: only when all entries have been seeded (autoStart=true) and channel is idle
-	if(q.autoStart && !isFadingChan(channel) && capacity == 0)
+	// Auto-start: only when the first logical entry is being added and channel is idle
+	if(q.autoStart && !isFadingChan(channel) && currentCount == 0)
 		startNextFade(channel);
 
 	return true;

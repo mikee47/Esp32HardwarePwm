@@ -84,6 +84,12 @@ public:
 		CYCLIC, ///< Playback loops back to entry 0 endlessly; onCyclicWrap fires on each loop
 	};
 
+	/** @brief Error codes delivered to the onQueueError callback */
+	enum class QueueError : uint8_t {
+		QUEUE_FULL,      ///< No space in the queue; the fade was not enqueued
+		SPLIT_DEGRADED,  ///< Fade needed splitting but segments didn't fit; pushed unsplit (timing accuracy reduced)
+	};
+
 	// -----------------------------------------------------------------------
 	// Configuration types — declared before constructors so they are visible
 	// in constructor parameter lists.
@@ -383,6 +389,17 @@ public:
 	/** @brief Returns true if the queue starts automatically on first queueFadeChan() call */
 	bool getQueueAutoStart(uint8_t channel) const;
 
+	/** @brief Override the per-reload overhead used to correct queued fade durations.
+	 * Normally auto-computed as (1 PWM period + DISPATCH_LATENCY_US) by the
+	 * constructor and by setFrequency().  Set to 0 to disable correction.
+	 * @param channel Channel index
+	 * @param overheadUs Overhead to deduct per reload, in microseconds
+	 */
+	void setReloadOverheadUs(uint8_t channel, uint32_t overheadUs);
+
+	/** @brief Get the per-reload overhead currently configured for a channel */
+	uint32_t getReloadOverheadUs(uint8_t channel) const;
+
 	/** @brief Callback fired after every individual fade completes (even if more are queued) */
 	void setOnFadeDoneCallback(Delegate<void(uint8_t)> cb)
 	{
@@ -399,6 +416,15 @@ public:
 	void setOnCyclicWrapCallback(Delegate<void(uint8_t)> cb)
 	{
 		onCyclicWrap_ = cb;
+	}
+
+	/** @brief Callback fired when a queueFadeChan call fails or degrades.
+	 *  The callback receives the channel index and the QueueError reason.
+	 *  For QUEUE_FULL the fade was not enqueued; for SPLIT_DEGRADED the fade
+	 *  was enqueued unsplit (hardware timing accuracy may be reduced). */
+	void setOnQueueErrorCallback(Delegate<void(uint8_t, QueueError)> cb)
+	{
+		onQueueError_ = cb;
 	}
 
 	// -----------------------------------------------------------------------
@@ -461,6 +487,7 @@ private:
 	struct FadeEntry {
 		uint32_t targetDuty;
 		uint32_t fadeTimeMs;
+		bool isPartial = false; ///< True for intermediate segments of a split long-range fade
 	};
 
 	struct ChannelFadeQueue {
@@ -471,6 +498,9 @@ private:
 		uint16_t cycleLen = 0;			///< CYCLIC: number of entries in the cycle
 		QueueMode mode = QueueMode::FIFO;
 		bool autoStart = true; ///< If true, playback starts on first queueFadeChan(); false requires startQueue()
+		uint32_t reloadOverheadUs = 0;	  ///< Per-reload overhead subtracted from each step (µs)
+		int32_t carryUs = 0;		      ///< Sub-ms accumulator for overhead correction
+		bool activeIsIntermediate = false; ///< True when the executing entry is a partial (intermediate) split segment
 	};
 
 	struct PinConfig {
@@ -498,10 +528,24 @@ private:
 	volatile uint32_t pendingFadeCallbacks_ = 0;
 	volatile bool fadeCallbackQueued_ = false;
 
+#ifdef HW_PWM_MEASURE_LATENCY
+	// ISR-side timestamp per channel (µs, set in fadeDoneCallback before queueCallback)
+	volatile int64_t isrTimestamp_[SOC_LEDC_CHANNEL_NUM] = {};
+	// Latency statistics (updated in dispatchFadeCallbacks, task context)
+	struct LatencyStat {
+		int64_t minUs = INT64_MAX;
+		int64_t maxUs = 0;
+		int64_t sumUs = 0;
+		uint32_t count = 0;
+	};
+	LatencyStat latency_[SOC_LEDC_CHANNEL_NUM];
+#endif
+
 	// Application-level callbacks
 	Delegate<void(uint8_t)> onFadeDone_;
 	Delegate<void(uint8_t)> onQueueEmpty_;
 	Delegate<void(uint8_t)> onCyclicWrap_;
+	Delegate<void(uint8_t, QueueError)> onQueueError_;
 
 	/**
      * @brief Initialize PWM instance
@@ -569,6 +613,9 @@ private:
 
 	// Start the next fade from the queue; returns false if queue empty
 	bool startNextFade(uint8_t channel_idx);
+
+	// Raw LEDC hardware fade — used by startNextFade only; bypasses queue and split logic
+	bool fadeHwChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms);
 
 	// esp_timer callback — runs in task context, static wrapper required for C function pointer
 	static void spreadSpectrumTimerCb(void* arg);

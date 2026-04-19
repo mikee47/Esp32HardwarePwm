@@ -323,6 +323,97 @@ pwm.startQueue(1);  // must be called after seeding; CYCLIC does not auto-start
 
 See `samples/FadeQueue_HwPWM` for a complete demonstration of both modes.
 
+## Timing Accuracy
+
+Three independent sources of error affect fade timing.  Understanding them helps
+choose the right timer configuration and set realistic expectations.
+
+### 1. Duty-step quantisation (applies to every fade call)
+
+`ledc_set_fade_time_and_start` translates a requested fade duration into integer
+hardware parameters:
+
+```
+cycles_per_step = floor(fade_ms × timer_freq_Hz / duty_levels)
+actual_ms       = duty_levels × cycles_per_step × (1 / timer_freq_Hz) × 1000
+```
+
+Because of the `floor`, the actual duration is always **shorter** than requested.
+The total shortfall is determined by the remainder of the division:
+
+```
+error_ms = (fade_ms × timer_freq_Hz  mod  duty_levels) / timer_freq_Hz
+```
+
+The error depends on how evenly the fade duration divides into duty steps — it
+is **not** a simple function of bit depth or frequency alone.  Higher frequency
+generally reduces the error (more cycles to distribute), but the specific
+fade duration matters.  The maximum possible shortfall is one timer period
+(when the remainder equals `duty_levels − 1`).
+
+### 2. Queue-reload latency (applies to every step when chaining short fades)
+
+When the LEDC fade-done ISR fires, the library posts a FreeRTOS message to the
+Sming main-task queue.  The main task dequeues the entry and calls
+`ledc_set_fade_time_and_start` for the next step.  Three sub-sources contribute:
+
+| Sub-source | Typical cost |
+|---|---|
+| ISR → Sming task-queue post | < 10 µs |
+| FreeRTOS task wake-up + context switch | ~10–50 µs |
+| LEDC timer-cycle sync (next fade starts on next timer edge) | 2–3 timer periods |
+
+The dominant term is the **timer-cycle sync**.  LEDC cannot start a new fade
+mid-cycle; the `ledc_set_fade_time_and_start` call itself takes some time, and
+by the time the hardware receives the start command the current timer cycle may
+already be more than one period ahead.  In practice, 2–3 timer periods elapse
+between the ISR firing and the next fade actually beginning.
+
+### 3. Code-execution overhead
+
+The path through the ISR, the FreeRTOS message, and `ledc_set_fade_time_and_start`
+itself takes a few tens of microseconds.  This is negligible compared to the
+timer-sync penalty for all practical frequencies (≤ 40 kHz) and cannot be
+eliminated without a custom IDF patch that chains fades from within the ISR.
+
+### Measured results
+
+The following table was produced by `samples/TimingTest_HwPWM` running a 60 s
+fade on an ESP32 (3000 × 20 ms micro-fades for the reload overhead measurement):
+
+| Config       | Quant. error (single 60 s fade) |          | Reload overhead (3000 × 20 ms steps) |              |
+|---|---|---|---|---|
+|              | deviation        | % of 60 s | total excess   | per step     |
+| 1 kHz/10-bit | −665 ms          | −1.11 %   | +8988 ms       | 2996 µs      |
+| 4 kHz/10-bit | −154 ms          | −0.26 %   | +5989 ms       | 1996 µs      |
+| 4 kHz/13-bit | −613 ms          | −1.02 %   | +2241 ms       |  747 µs      |
+| 8 kHz/13-bit | −519 ms          | −0.87 %   | +1214 ms       |  404 µs      |
+
+Key observations:
+- **Quantisation error is fade-duration-dependent.**  The 4 kHz/10-bit config
+  has the smallest absolute error for a 60 s fade, while 4 kHz/13-bit is worse
+  than 4 kHz/10-bit — this is a coincidence of how 60 000 ms × 4000 Hz divides
+  into 1023 vs 8191 duty steps.  For a different fade duration the ranking
+  can change.
+- **Reload overhead scales with timer period, but also with duty resolution.**
+  At the same 4 kHz frequency, 13-bit resolution (8191 steps) gives ~750 µs/step
+  while 10-bit (1023 steps) gives ~2000 µs/step.  With more duty steps LEDC
+  spends fewer timer cycles per step, so the synchronisation wait is a smaller
+  fraction of the step duration.  The combined effect means **higher frequency
+  and higher bit depth both reduce per-step latency**.
+- **Higher frequency always reduces per-step latency**, regardless of bit depth.
+
+### Choosing timer parameters
+
+| Goal | Recommendation |
+|---|---|
+| Minimal per-step latency for chained micro-fades | Maximise frequency (8 kHz / 13-bit: ~400 µs/step) |
+| Minimal quantisation error for a specific fade duration | Run `TimingTest_HwPWM` to find the config where `fade_ms × freq mod duty_levels` is smallest |
+| Balance for RGBWW lighting (steps ≥ 20 ms) | 4 kHz / 13-bit: ~750 µs/step, <1.1 % length error |
+
+See `samples/TimingTest_HwPWM` for a hardware benchmark that measures both
+effects across multiple configurations in a single run.
+
 ## License
 
 This library is provided under the LGPL v3 license as part of the Sming Framework Project.
