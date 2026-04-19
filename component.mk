@@ -32,6 +32,7 @@ endif
 HWPWM_CALIB_HDR := $(COMPONENT_PATH)/src/calibration/HwPwmCalib_$(SMING_SOC).h
 ifneq ($(wildcard $(HWPWM_CALIB_HDR)),)
   COMPONENT_CXXFLAGS += -DHWPWM_HAS_SOC_CALIB
+  COMPONENT_CXXFLAGS += -DHWPWM_SOC_CALIB_HEADER='"HwPwmCalib_$(SMING_SOC).h"'
   COMPONENT_INCDIRS  += src/calibration
   $(info Esp32HardwarePwm: using SOC calibration table $(HWPWM_CALIB_HDR))
 endif
