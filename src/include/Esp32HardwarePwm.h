@@ -34,6 +34,7 @@
 #include <array>
 #include <esp_attr.h>
 #include <Delegate.h>
+#include <SimpleTimer.h>
 
 // ---------------------------------------------------------------------------
 // Per-channel fade queue depth — override before including this header.
@@ -94,6 +95,7 @@
  */
 class Esp32HardwarePwm
 {
+	friend void steadyFadeTimerCb(void* arg);
 public:
 	static constexpr uint8_t BadChannel = 0xff; ///< Invalid PWM channel indicator
 
@@ -380,7 +382,30 @@ public:
 		return queueFadeChan(channel, static_cast<uint32_t>(targetPct / 100.0f * getMaxDuty()), fadeTimeMs);
 	}
 
-	/** @brief Return number of entries currently in the queue for a channel */
+	/** @brief Set duty cycle for a channel using CIE 1931 perceptual percentage (0.0–100.0).
+	 * Converts a perceptually-uniform lightness value to a linear hardware duty.
+	 */
+	bool setDutyChanCiePercent(uint8_t channel, DutyCycle percentage, bool update_immediately = true)
+	{
+		return setDutyChan(channel, static_cast<uint32_t>(cie1931Linear(percentage) * getMaxDuty()),
+						   update_immediately);
+	}
+
+	/** @brief Fade a channel to a CIE 1931 perceptual percentage target (0.0–100.0). */
+	bool fadeToPercentChanCie(uint8_t channel_idx, DutyCycle target_pct, uint32_t fade_time_ms)
+	{
+		return fadeToValueChan(channel_idx,
+							   static_cast<uint32_t>(cie1931Linear(target_pct) * getMaxDuty()),
+							   fade_time_ms);
+	}
+
+	/** @brief Enqueue a fade on a channel to a CIE 1931 perceptual percentage target (0.0–100.0). */
+	bool queueFadeChanCiePercent(uint8_t channel, DutyCycle targetPct, uint32_t fadeTimeMs)
+	{
+		return queueFadeChan(channel,
+							 static_cast<uint32_t>(cie1931Linear(targetPct) * getMaxDuty()),
+							 fadeTimeMs);
+	}
 	uint16_t getQueueEntries(uint8_t channel) const;
 
 	/** @brief Clear the queue for a channel and reset mode to FIFO.
@@ -590,6 +615,9 @@ private:
 		bool isActive = false;					 ///< True when channel is running
 	};
 
+	// Per-channel timer for steady (x->x) fades
+	std::vector<SimpleTimer*> steadyFadeTimers_;
+
 	TimerConfig timer_;
 	SpreadSpectrumConfig spreadSpectrum_;
 	PhaseShiftConfig phaseShift_;
@@ -686,6 +714,25 @@ private:
 
 	// esp_timer callback — runs in task context, static wrapper required for C function pointer
 	static void spreadSpectrumTimerCb(void* arg);
+
+	// -----------------------------------------------------------------
+	// CIE 1931 perceptual correction
+	// Maps a perceptual lightness percentage (0–100) to a linear
+	// duty cycle value using the standard CIE 1931 formula:
+	//   L <= 8  →  Y = L / 902.3
+	//   L  > 8  →  Y = ((L + 16) / 116)^3
+	// -----------------------------------------------------------------
+	static float cie1931Linear(float L)
+	{
+		if(L <= 0.0f)
+			return 0.0f;
+		if(L >= 100.0f)
+			return 1.0f;
+		if(L <= 8.0f)
+			return L / 902.3f;
+		float t = (L + 16.0f) / 116.0f;
+		return t * t * t;
+	}
 };
 
 /** @} */

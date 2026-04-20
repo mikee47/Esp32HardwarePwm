@@ -37,11 +37,14 @@
  * - Hardware fade support
  * - Phase shifting for EMI reduction
  * - Hardware fading leveraging the ledc_set_fade_and_start 
+ * - Per-channel fade queues with FIFO and CYCLIC modes
+ * - Automatic splitting of long fades to work around the LEDC step_num ≤ 1023
+ * - Per-reload timing compensation to reduce accumulated latency in queued sequences
+ * - Application callbacks for fade completion, queue empty, cyclic wrap, and queue errors
+ * - Safe teardown with pending callback tracking to prevent use-after-free
+ * Note: All LEDC resources are released in the destructor.
+ * 
  *
- * toDo:
- * - currently, fade does not provide any callbacks, might be worthwhile to implement them in the future
- *   just callign that from the internal fadeDoneCallback() might be risky as that's run in an interrupt
- * -  
  *
  ****/
 
@@ -153,6 +156,22 @@ uint32_t periodToFrequency(uint32_t period_us)
 
 } // anonymous namespace
 
+// ---------------------------------------------------------------------------
+// Steady (zero-range) fade timer callback
+// ---------------------------------------------------------------------------
+
+void steadyFadeTimerCb(void* arg)
+{
+	uintptr_t packed = reinterpret_cast<uintptr_t>(arg);
+	auto* self = reinterpret_cast<Esp32HardwarePwm*>(packed >> 8);
+	uint8_t channel_idx = static_cast<uint8_t>(packed & 0xFF);
+	self->pendingFadeCallbacks_ |= (1u << channel_idx);
+	if(!self->fadeCallbackQueued_) {
+		self->fadeCallbackQueued_ = true;
+		System.queueCallback(Esp32HardwarePwm::dispatchFadeCallbacks, reinterpret_cast<uint32_t>(self));
+	}
+}
+
 //=============================================================================
 // Esp32HardwarePwm Implementation
 //=============================================================================
@@ -175,6 +194,9 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& con
 	for(auto& q : fadeQueues_) {
 		q.entries.resize(FADE_QUEUE_DEPTH);
 	}
+	steadyFadeTimers_.resize(pins.size(), nullptr);
+	for(auto& t : steadyFadeTimers_)
+		t = new SimpleTimer();
 
 	// basic sanity checks
 	if(pins.size() == 0) {
@@ -240,6 +262,11 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& con
 
 Esp32HardwarePwm::~Esp32HardwarePwm()
 {
+	for(auto& t : steadyFadeTimers_) {
+		delete t;
+		t = nullptr;
+	}
+
 	if(initialized_) {
 		// Stop all channels FIRST — ledc_stop aborts any in-progress hardware fade,
 		// preventing the fade-done ISR from firing after this object is destroyed.
@@ -812,12 +839,35 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 		}
 	};
 
+	// Zero-range guard: if target == current duty, LEDC cannot execute a hardware fade.
+	// Handle by firing the callback immediately (fadeTimeMs==0) or via a SimpleTimer.
+	auto handleZeroRangeFade = [&](FadeEntry& entry) -> bool {
+		applyCorrections(entry);
+		if(entry.targetDuty != pins_[channel_idx].targetDuty)
+			return false;
+		q.activeIsIntermediate = entry.isPartial;
+		if(entry.fadeTimeMs == 0) {
+			pendingFadeCallbacks_ |= (1u << channel_idx);
+			if(!fadeCallbackQueued_) {
+				fadeCallbackQueued_ = true;
+				System.queueCallback(dispatchFadeCallbacks, reinterpret_cast<uint32_t>(this));
+			}
+		} else {
+			uintptr_t packed = (reinterpret_cast<uintptr_t>(this) << 8) | channel_idx;
+			steadyFadeTimers_[channel_idx]
+				->initializeMs(entry.fadeTimeMs, steadyFadeTimerCb, reinterpret_cast<void*>(packed))
+				.startOnce();
+		}
+		return true;
+	};
+
 	if(q.mode == QueueMode::FIFO) {
 		if(q.count == 0)
 			return false;
 		FadeEntry entry = dequeueFifo(q);
 		q.activeIsIntermediate = entry.isPartial;
-		applyCorrections(entry);
+		if(handleZeroRangeFade(entry))
+			return true;
 		return fadeHwChan(channel_idx, entry.targetDuty, entry.fadeTimeMs);
 	} else {
 		// CYCLIC
@@ -829,7 +879,8 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 		if(nextHead == 0 && onCyclicWrap_)
 			onCyclicWrap_(channel_idx);
 		q.head = nextHead;
-		applyCorrections(entry);
+		if(handleZeroRangeFade(entry))
+			return true;
 		return fadeHwChan(channel_idx, entry.targetDuty, entry.fadeTimeMs);
 	}
 }
@@ -953,7 +1004,7 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 	uint32_t rangeAbs = (targetDuty >= fromDuty) ? (targetDuty - fromDuty) : (fromDuty - targetDuty);
 
 	// -----------------------------------------------------------------------
-	// Splitting: why it exists, what it fixes, and what it cannot fix
+	// Splitting: why it exists, what it fixes and what it cannot fix
 	//
 	// The LEDC hardware has a 10-bit step_num field (max 1023).  When the duty
 	// range of a fade exceeds 1023 counts, the driver sets scale = ceil(range/1023),
