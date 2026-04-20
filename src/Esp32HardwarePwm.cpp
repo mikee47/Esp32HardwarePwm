@@ -285,6 +285,12 @@ Esp32HardwarePwm::~Esp32HardwarePwm()
 		ledc_fade_func_uninstall();
 	}
 
+	if(spreadSpectrumTimer_ != nullptr) {
+		esp_timer_stop(spreadSpectrumTimer_);
+		esp_timer_delete(spreadSpectrumTimer_);
+		spreadSpectrumTimer_ = nullptr;
+	}
+
 	if(initialized_) {
 		// Pause the timer before deconfiguring — ledc_timer_del rejects a
 		// still-running timer with ESP_ERR_INVALID_STATE.
@@ -668,6 +674,7 @@ bool Esp32HardwarePwm::setupSpreadSpectrum(int frequency, SpreadSpectrumConfig& 
 		return false;
 	}
 
+	spreadSpectrumTimer_ = timer_handle;
 	return true;
 }
 
