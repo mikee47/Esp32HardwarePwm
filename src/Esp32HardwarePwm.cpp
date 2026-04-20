@@ -496,29 +496,21 @@ bool Esp32HardwarePwm::fadeHwChan(uint8_t channel_idx, uint32_t target_duty, uin
 	return true;
 }
 
-bool Esp32HardwarePwm::fadeToValueChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms)
+bool Esp32HardwarePwm::fadeChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms, bool queue)
 {
+	if(queue)
+		return queueDutyChan(channel_idx, target_duty, fade_time_ms);
 	if(channel_idx >= pins_.size())
 		return false;
 	// Remember whether the channel is mid-fade before we clear the queue.
-	// queueFadeChan's auto-start only fires when the channel is idle, so if a
+	// queueDutyChan's auto-start only fires when the channel is idle, so if a
 	// fade was running we must force-start the new entry ourselves after enqueue.
 	bool wasFading = isFadingChan(channel_idx);
 	resetQueue(channel_idx);
-	bool ok = queueFadeChan(channel_idx, target_duty, fade_time_ms);
+	bool ok = queueDutyChan(channel_idx, target_duty, fade_time_ms);
 	if(ok && wasFading)
 		startNextFade(channel_idx); // preempts in-progress hw fade on this channel only
 	return ok;
-}
-
-bool Esp32HardwarePwm::fadeToPercentChan(uint8_t channel_idx, float target_pct, uint32_t fade_time_ms)
-{
-	if(target_pct < 0.0f)
-		target_pct = 0.0f;
-	if(target_pct > 100.0f)
-		target_pct = 100.0f;
-	uint32_t target_duty = static_cast<uint32_t>((target_pct / 100.0f) * getMaxDuty());
-	return fadeToValueChan(channel_idx, target_duty, fade_time_ms);
 }
 
 bool Esp32HardwarePwm::isFadingChan(uint8_t channel_idx) const
@@ -858,7 +850,7 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 			return false;
 		// Mark channel as "fading" so isFadingChan() returns true for the
 		// duration of the steady-hold.  Without this a caller can re-enter
-		// fadeToValueChan / queueFadeChan before the timer fires, corrupt the
+		// fadeChan before the timer fires, corrupt the
 		// queue, and lose the pending callback.
 		fadeDone_[channel_idx] = false;
 		q.activeIsIntermediate = entry.isPartial;
@@ -997,10 +989,10 @@ uint32_t Esp32HardwarePwm::getReloadOverheadUs(uint8_t channel) const
 	return fadeQueues_[channel].reloadOverheadUs;
 }
 
-bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs)
+bool Esp32HardwarePwm::queueDutyChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs)
 {
 	if(!initialized_ || !fadeInstalled_ || channel >= pins_.size()) {
-		debug_e("queueFadeChan: not initialized, fade not installed, or channel %d out of range", channel);
+		debug_e("queueDutyChan: not initialized, fade not installed, or channel %d out of range", channel);
 		return false;
 	}
 
@@ -1062,7 +1054,7 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 		// Minimum frequency needed to reach cycle_num == SPLIT_STEP_QUALITY for this fade:
 		//   freq_min = SPLIT_STEP_QUALITY * 1000 * rangeAbs / fadeTimeMs
 		uint32_t freq_min = (uint32_t)(((uint64_t)SPLIT_STEP_QUALITY * 1000ULL * rangeAbs) / fadeTimeMs);
-		debug_w("queueFadeChan: ch%d cycle_num=%llu (< %lu) — fade may be %lld ms short (hw limit). "
+		debug_w("queueDutyChan: ch%d cycle_num=%llu (< %lu) — fade may be %lld ms short (hw limit). "
 				"Fix: increase fadeTimeMs, lower resolution, or raise frequency to >= %lu Hz",
 				channel, (unsigned long long)cycle_num, (unsigned long)SPLIT_STEP_QUALITY,
 				(long long)((int64_t)fadeTimeMs - (int64_t)(t_actual_us / 1000)), (unsigned long)freq_min);
@@ -1077,18 +1069,18 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 	// timing error, but the fade will still execute.
 	if(nSegs > 1 && currentCount + nSegs > (uint16_t)q.entries.size()) {
 		if(currentCount + 1 <= (uint16_t)q.entries.size()) {
-			debug_w("queueFadeChan: ch%d split (%d segs) won't fit, falling back to unsplit", channel, nSegs);
+			debug_w("queueDutyChan: ch%d split (%d segs) won't fit, falling back to unsplit", channel, nSegs);
 			if(onQueueError_)
 				onQueueError_(channel, QueueError::SPLIT_DEGRADED);
 			nSegs = 1;
 		} else {
-			debug_d("queueFadeChan: channel %d queue full (%d entries, need %d slots)", channel, currentCount, nSegs);
+			debug_d("queueDutyChan: channel %d queue full (%d entries, need %d slots)", channel, currentCount, nSegs);
 			if(onQueueError_)
 				onQueueError_(channel, QueueError::QUEUE_FULL);
 			return false;
 		}
 	} else if(nSegs == 1 && currentCount + 1 > (uint16_t)q.entries.size()) {
-		debug_d("queueFadeChan: channel %d queue full", channel);
+		debug_d("queueDutyChan: channel %d queue full", channel);
 		if(onQueueError_)
 			onQueueError_(channel, QueueError::QUEUE_FULL);
 		return false;

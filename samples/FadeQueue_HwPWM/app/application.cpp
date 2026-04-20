@@ -84,31 +84,31 @@ void setupFadeQueueDemo()
 	Serial.println(_F("Channel 0: FIFO — queuing 3 fades (100%->0%->50%->0%->100%->50%)"));
 	// Mode defaults to FIFO; no setQueueMode call needed
 	pwm.setQueueCapacity(0, 25);
-	pwm.queueFadePercentChan(0, 100.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 0.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 50.0f, FADE_MS / 2);
-	pwm.queueFadePercentChan(0, 0.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 100.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 50.0f, FADE_MS);
-	pwm.queueFadePercentChan(0, 100.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 0.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 50.0f, FADE_MS / 2);
-	pwm.queueFadePercentChan(0, 0.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 100.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 50.0f, FADE_MS);
-	pwm.queueFadePercentChan(0, 100.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 0.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 50.0f, FADE_MS / 2);
-	pwm.queueFadePercentChan(0, 0.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 100.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 50.0f, FADE_MS);
-	pwm.queueFadePercentChan(0, 100.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 0.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 50.0f, FADE_MS / 2);
-	pwm.queueFadePercentChan(0, 0.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 100.0f, FADE_MS / 5);
-	pwm.queueFadePercentChan(0, 50.0f, FADE_MS);
-	pwm.queueFadePercentChan(0, 0.0f, 5000);
+	pwm.fadePercentChan(0, 100.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 0.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 50.0f, FADE_MS / 2, false, true);
+	pwm.fadePercentChan(0, 0.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 100.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 50.0f, FADE_MS, false, true);
+	pwm.fadePercentChan(0, 100.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 0.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 50.0f, FADE_MS / 2, false, true);
+	pwm.fadePercentChan(0, 0.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 100.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 50.0f, FADE_MS, false, true);
+	pwm.fadePercentChan(0, 100.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 0.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 50.0f, FADE_MS / 2, false, true);
+	pwm.fadePercentChan(0, 0.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 100.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 50.0f, FADE_MS, false, true);
+	pwm.fadePercentChan(0, 100.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 0.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 50.0f, FADE_MS / 2, false, true);
+	pwm.fadePercentChan(0, 0.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 100.0f, FADE_MS / 5, false, true);
+	pwm.fadePercentChan(0, 50.0f, FADE_MS, false, true);
+	pwm.fadePercentChan(0, 0.0f, 5000, false, true);
 	// ------------------------------------------------------------------
 	// Channel 1: CYCLIC — 3 entries loop until resetQueue() is called
 	// ------------------------------------------------------------------
@@ -116,10 +116,10 @@ void setupFadeQueueDemo()
 	pwm.setQueueMode(1, Esp32HardwarePwm::QueueMode::CYCLIC);
 	// Demonstrate runtime-configurable queue depth (4 slots instead of default 10)
 	pwm.setQueueCapacity(1, 4);
-	pwm.queueFadePercentChan(1, 100.0f, FADE_MS);
-	pwm.queueFadePercentChan(1, 0.0f, FADE_MS);
-	pwm.queueFadePercentChan(1, 50.0f, FADE_MS);
-	pwm.queueFadePercentChan(1, 0.0f, FADE_MS);
+	pwm.fadePercentChan(1, 100.0f, FADE_MS, false, true);
+	pwm.fadePercentChan(1, 0.0f, FADE_MS, false, true);
+	pwm.fadePercentChan(1, 50.0f, FADE_MS, false, true);
+	pwm.fadePercentChan(1, 0.0f, FADE_MS, false, true);
 	// All entries seeded — now start the cycle explicitly
 	pwm.startQueue(1);
 }

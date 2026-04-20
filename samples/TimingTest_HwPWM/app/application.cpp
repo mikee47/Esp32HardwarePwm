@@ -121,7 +121,7 @@ void pushMicroSteps()
 	// Reload overhead correction is applied automatically by the library
 	// (1 PWM period + DISPATCH_LATENCY_US per step, via carry accumulator).
 	while(stepsPushed < TOTAL_STEPS) {
-		if(!pwm->queueFadePercentChan(CH_MICRO, stepDuty(stepsPushed), MICROFADE_MS))
+				if(!pwm->fadePercentChan(CH_MICRO, stepDuty(stepsPushed), MICROFADE_MS, false, true))
 			break;
 		++stepsPushed;
 	}
@@ -258,13 +258,13 @@ void runConfig(size_t idx)
 			halfSeg = 1;
 		pwm->setQueueMode(CH_TRI, Esp32HardwarePwm::QueueMode::CYCLIC);
 		pwm->setQueueCapacity(CH_TRI, (uint16_t)(2u * halfSeg));
-		pwm->queueFadePercentChan(CH_TRI, 100.0f, 300); // 0% → 100% in 300 ms
-		pwm->queueFadePercentChan(CH_TRI, 0.0f, 300);   // 100% → 0% in 300 ms
+				pwm->fadePercentChan(CH_TRI, 100.0f, 300, false, true); // 0% → 100% in 300 ms
+				pwm->fadePercentChan(CH_TRI, 0.0f, 300, false, true);   // 100% → 0% in 300 ms
 		pwm->startQueue(CH_TRI);
 	}
 
 	tStart = esp_timer_get_time();
-	pwm->queueFadePercentChan(CH_SINGLE, 100.0f, TOTAL_FADE_MS);
+		pwm->fadePercentChan(CH_SINGLE, 100.0f, TOTAL_FADE_MS, false, true);
 	pushMicroSteps();
 
 	Serial.printf("Running... (~%lu s)\n", (unsigned long)(TOTAL_FADE_MS / 1000));
