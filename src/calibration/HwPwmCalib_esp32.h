@@ -65,7 +65,6 @@ static const Esp32HardwarePwm::CalibrationEntry hwpwmCalib_esp32[] = {
 // clang-format on
 
 #define HWPWM_CALIB_TABLE hwpwmCalib_esp32
-#define HWPWM_CALIB_COUNT (sizeof(hwpwmCalib_esp32)/sizeof(hwpwmCalib_esp32[0]))
+#define HWPWM_CALIB_COUNT (sizeof(hwpwmCalib_esp32) / sizeof(hwpwmCalib_esp32[0]))
 
 #endif // HWPWM_CALIB_esp32_H
-

@@ -26,12 +26,11 @@ namespace
 // ---------------------------------------------------------------------------
 // Hardware config
 // ---------------------------------------------------------------------------
-constexpr uint32_t ATTACK_MS    = 200;  ///< 0% → 80%
-constexpr uint32_t RELEASE_MS   = 200;  ///< 80% → 0%
+constexpr uint32_t ATTACK_MS = 200;  ///< 0% → 80%
+constexpr uint32_t RELEASE_MS = 200; ///< 80% → 0%
 
-constexpr float    PEAK_PCT     = 80.0f;
-constexpr float    RELEASE_PCT  = 10.0f;
-
+constexpr float PEAK_PCT = 80.0f;
+constexpr float RELEASE_PCT = 10.0f;
 
 // Pins — avoid GPIO 6-11 (flash), 34-39 (input-only on ESP32 classic).
 std::vector<uint8_t> pinList{13, 12, 14, 27, 26, 25};
@@ -60,14 +59,14 @@ std::vector<bool> firstFadeFired(pinList.size(), false);
 // ---------------------------------------------------------------------------
 void startChannel(uint8_t ch)
 {
-    pwm.setQueueMode(ch, Esp32HardwarePwm::QueueMode::CYCLIC);
-    pwm.setQueueCapacity(ch, 3);
-    pwm.queueFadePercentChan(ch, PEAK_PCT, ATTACK_MS); // 0% → 80%
-    pwm.queueFadePercentChan(ch, RELEASE_PCT, RELEASE_MS); // 80% → 10%
-    pwm.queueFadePercentChan(ch, 0, 600); // 10% → 0%
-    
-    pwm.startQueue(ch);
-    Serial.printf("CH%u started\n", (unsigned)ch);
+	pwm.setQueueMode(ch, Esp32HardwarePwm::QueueMode::CYCLIC);
+	pwm.setQueueCapacity(ch, 3);
+	pwm.queueFadePercentChanCie1931(ch, PEAK_PCT, ATTACK_MS);	 // 0% → 80%
+	pwm.queueFadePercentChanCie1931(ch, RELEASE_PCT, RELEASE_MS); // 80% → 10%
+	pwm.queueFadePercentChan(ch, 0, 600);						  // 10% → 0%
+
+	pwm.startQueue(ch);
+	Serial.printf("CH%u started\n", (unsigned)ch);
 }
 
 // ---------------------------------------------------------------------------
@@ -75,43 +74,42 @@ void startChannel(uint8_t ch)
 // ---------------------------------------------------------------------------
 void setupCallbacks()
 {
-    // onFadeDone fires after every individual fade step.
-    // The first time it fires on channel N = the attack just completed.
-    // Use that single event to start channel N+1.
-    pwm.setOnFadeDoneCallback([](uint8_t ch) {
-        if(!firstFadeFired[ch]) {
-            firstFadeFired[ch] = true;
-            uint8_t next = ch + 1;
-            if(next < pinList.size()) {
-                Serial.printf("CH%u attack done → starting CH%u\n",
-                              (unsigned)ch, (unsigned)next);
-                startChannel(next);
-            } else {
-                Serial.println(_F("All channels running."));
-            }
-        }
-    });
+	// onFadeDone fires after every individual fade step.
+	// The first time it fires on channel N = the attack just completed.
+	// Use that single event to start channel N+1.
+	pwm.setOnFadeDoneCallback([](uint8_t ch) {
+		if(!firstFadeFired[ch]) {
+			firstFadeFired[ch] = true;
+			uint8_t next = ch + 1;
+			if(next < pinList.size()) {
+				Serial.printf("CH%u attack done → starting CH%u\n", (unsigned)ch, (unsigned)next);
+				startChannel(next);
+			} else {
+				Serial.println(_F("All channels running."));
+			}
+		}
+	});
 }
 
 } // namespace
 
 void init()
 {
-    Serial.begin(SERIAL_BAUD_RATE);
-    Serial.systemDebugOutput(false);
+	Serial.begin(SERIAL_BAUD_RATE);
+	Serial.systemDebugOutput(false);
 
-    Serial.println(_F("\nStaggeredFade_HwPWM"));
-    Serial.printf("  Attack:  %lu ms (0%% → %.0f%%)\n", (unsigned long)ATTACK_MS, (double)PEAK_PCT);
-    Serial.printf("  Release: %lu ms (%.0f%% → 0%%)\n", (unsigned long)RELEASE_MS, (double)PEAK_PCT);
-    Serial.println(_F("  Each channel starts when the previous channel's first attack completes.\n"));
+	Serial.println(_F("\nStaggeredFade_HwPWM"));
+	Serial.printf("  Attack:  %lu ms (0%% → %.0f%%)\n", (unsigned long)ATTACK_MS, (double)PEAK_PCT);
+	Serial.printf("  Release: %lu ms (%.0f%% → 0%%)\n", (unsigned long)RELEASE_MS, (double)PEAK_PCT);
+	Serial.println(_F("  Each channel starts when the previous channel's first attack completes.\n"));
 
-    if(!pwm.isInitialized()) {
-        Serial.println(_F("PWM init failed — check pin list"));
-        return;
-    }
+	if(!pwm.isInitialized()) {
+		Serial.println(_F("PWM init failed — check pin list"));
+		return;
+	}
 
-    setupCallbacks();
+	setupCallbacks();
 
-    // CH0 starts immediately; CH1-4 are started from the fadeDone callback.
-    startChannel(0);
+	// CH0 starts immediately; CH1-4 are started from the fadeDone callback.
+	startChannel(0);
 }

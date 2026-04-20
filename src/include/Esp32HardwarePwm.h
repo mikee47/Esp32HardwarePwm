@@ -112,8 +112,8 @@ public:
 
 	/** @brief Error codes delivered to the onQueueError callback */
 	enum class QueueError : uint8_t {
-		QUEUE_FULL,      ///< No space in the queue; the fade was not enqueued
-		SPLIT_DEGRADED,  ///< Fade needed splitting but segments didn't fit; pushed unsplit (timing accuracy reduced)
+		QUEUE_FULL,		///< No space in the queue; the fade was not enqueued
+		SPLIT_DEGRADED, ///< Fade needed splitting but segments didn't fit; pushed unsplit (timing accuracy reduced)
 	};
 
 	// -----------------------------------------------------------------------
@@ -391,17 +391,14 @@ public:
 	/** @brief Fade a channel to a CIE 1931 perceptual percentage target (0.0–100.0). */
 	bool fadeToPercentChanCie(uint8_t channel_idx, DutyCycle target_pct, uint32_t fade_time_ms)
 	{
-		return fadeToValueChan(channel_idx,
-							   static_cast<uint32_t>(cie1931Linear(target_pct) * getMaxDuty()),
+		return fadeToValueChan(channel_idx, static_cast<uint32_t>(cie1931Linear(target_pct) * getMaxDuty()),
 							   fade_time_ms);
 	}
 
 	/** @brief Enqueue a fade on a channel to a CIE 1931 perceptual percentage target (0.0–100.0). */
 	bool queueFadeChanCiePercent(uint8_t channel, DutyCycle targetPct, uint32_t fadeTimeMs)
 	{
-		return queueFadeChan(channel,
-							 static_cast<uint32_t>(cie1931Linear(targetPct) * getMaxDuty()),
-							 fadeTimeMs);
+		return queueFadeChan(channel, static_cast<uint32_t>(cie1931Linear(targetPct) * getMaxDuty()), fadeTimeMs);
 	}
 	uint16_t getQueueEntries(uint8_t channel) const;
 
@@ -450,9 +447,9 @@ public:
 	 *   overheadUs = model + latPerStep_us   (clamped to 0 if negative)
 	 */
 	struct CalibrationEntry {
-		uint32_t         frequency;  ///< PWM frequency in Hz
+		uint32_t frequency;			 ///< PWM frequency in Hz
 		ledc_timer_bit_t resolution; ///< Timer resolution
-		uint32_t         overheadUs; ///< Measured per-reload overhead (µs)
+		uint32_t overheadUs;		 ///< Measured per-reload overhead (µs)
 	};
 
 	/**
@@ -596,11 +593,11 @@ private:
 		uint16_t cycleLen = 0;			///< CYCLIC: number of entries in the cycle
 		QueueMode mode = QueueMode::FIFO;
 		bool autoStart = true; ///< If true, playback starts on first queueFadeChan(); false requires startQueue()
-		uint32_t reloadOverheadUs = 0;	  ///< Per-reload overhead subtracted from each step (µs)
-		int32_t carryUs = 0;		      ///< Sub-ms accumulator for reload overhead correction
-		int32_t quantCarryUs = 0;	      ///< Sub-µs accumulator for cycle_num truncation correction
+		uint32_t reloadOverheadUs = 0;	 ///< Per-reload overhead subtracted from each step (µs)
+		int32_t carryUs = 0;			   ///< Sub-ms accumulator for reload overhead correction
+		int32_t quantCarryUs = 0;		   ///< Sub-µs accumulator for cycle_num truncation correction
 		bool activeIsIntermediate = false; ///< True when the executing entry is a partial (intermediate) split segment
-		bool warnedLowCycleNum = false;    ///< Suppress repeat low-cycle_num warnings for this channel
+		bool warnedLowCycleNum = false;	///< Suppress repeat low-cycle_num warnings for this channel
 	};
 
 	struct PinConfig {
@@ -615,9 +612,9 @@ private:
 	// Context block passed to steadyFadeTimerCb — one per channel, stable address.
 	struct SteadyFadeContext {
 		Esp32HardwarePwm* self;
-		uint8_t           channel_idx;
+		uint8_t channel_idx;
 	};
-	std::vector<SteadyFadeContext>            steadyFadeCtx_;
+	std::vector<SteadyFadeContext> steadyFadeCtx_;
 	std::vector<std::unique_ptr<SimpleTimer>> steadyFadeTimers_;
 
 	TimerConfig timer_;

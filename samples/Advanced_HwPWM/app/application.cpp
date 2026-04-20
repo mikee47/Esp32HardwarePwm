@@ -15,16 +15,16 @@
 
 namespace
 {
-#define LED_PIN 3
+#define LED_PIN 13
 // Channel index = 0-based position of LED_PIN in pinList.
 // This is independent of the hardware LEDC channel number and of Config::channelStart.
 // If you move LED_PIN to a different position in pinList, update LED_CHANNEL accordingly.
 #define LED_CHANNEL 0
 
-std::vector<uint8_t> pinList{13, 12, 14, 27, 26};
+std::vector<uint8_t> pinList{13, 12, 14, 27, 26, 23};
 
 // Default duty percentages, one per channel
-const Esp32HardwarePwm::DutyCycle defaultDutyPercent[]{50.0f, 95.0f, 50.0f, 85.0f, 10.0f};
+const Esp32HardwarePwm::DutyCycle defaultDutyPercent[]{5.0f, 10.0f, 15.0f, 20.0f, 25.0f, 10.0f};
 
 // clang-format off
 Esp32HardwarePwm pwm(pinList, Esp32HardwarePwm::Config{
@@ -41,7 +41,7 @@ Esp32HardwarePwm pwm(pinList, Esp32HardwarePwm::Config{
 });
 // clang-format on
 
-constexpr uint32_t FADE_TIME_MS = 2000; // duration of each sweep leg
+constexpr uint32_t FADE_TIME_MS = 4000; // duration of each sweep leg
 
 SimpleTimer procTimer;
 
@@ -49,13 +49,18 @@ void startNextFade()
 {
 	// Alternate between fading to 100% and back to 0%
 	static bool countUp = true;
-	pwm.fadeToPercentChan(LED_CHANNEL, countUp ? 100.0f : 0.0f, FADE_TIME_MS);
+	pwm.fadeToPercentChanCie(LED_CHANNEL, countUp ? 100.0f : 0.0f, FADE_TIME_MS);
 	countUp = !countUp;
 }
 
 void checkFadeDone()
 {
-	// When the hardware fade completes, immediately kick off the next one
+	/*
+	When the hardware fade completes, immediately kick off the next one
+	doing this manually allows to caclulate next step ad hoc (for the price
+	of a few ms of latency) if the next step(s) are known, it is probably better
+	to queue them up front and let the hardware handle the timing with no gaps.
+	*/
 	if(!pwm.isFadingChan(LED_CHANNEL)) {
 		startNextFade();
 	}
@@ -94,7 +99,7 @@ void init()
 
 	// Set default duty on every channel
 	for(uint8_t ch = 0; ch < pwm.getPinCount(); ++ch) {
-		pwm.setDutyChanPercent(ch, defaultDutyPercent[ch]);
+		pwm.setDutyChanCiePercent(ch, defaultDutyPercent[ch]);
 	}
 
 	Serial << _F("PWM output set on all ") << pwm.getPinCount() << _F(" channels.") << endl;

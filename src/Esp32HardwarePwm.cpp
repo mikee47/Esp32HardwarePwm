@@ -63,17 +63,17 @@
 // component.mk passes -DHWPWM_SOC_CALIB_HEADER='"HwPwmCalib_<soc>.h"' so we
 // can #include it directly without relying on token-pasting (which does not
 // work for #include filenames on all preprocessors).
-#  ifndef HWPWM_SOC_CALIB_HEADER
-#    error "HWPWM_SOC_CALIB_HEADER must be set by component.mk when HWPWM_HAS_SOC_CALIB is defined"
-#  endif
-#  include HWPWM_SOC_CALIB_HEADER
+#ifndef HWPWM_SOC_CALIB_HEADER
+#error "HWPWM_SOC_CALIB_HEADER must be set by component.mk when HWPWM_HAS_SOC_CALIB is defined"
+#endif
+#include HWPWM_SOC_CALIB_HEADER
 #endif
 
 // ---------------------------------------------------------------------------
 // Hardware calibration table storage
 // ---------------------------------------------------------------------------
 static const Esp32HardwarePwm::CalibrationEntry* s_calibTable = nullptr;
-static size_t                                    s_calibCount = 0;
+static size_t s_calibCount = 0;
 
 void Esp32HardwarePwm::setCalibrationTable(const CalibrationEntry* table, size_t count)
 {
@@ -92,7 +92,7 @@ struct HwPwmCalibAutoInstall {
 		Esp32HardwarePwm::setCalibrationTable(HWPWM_CALIB_TABLE, HWPWM_CALIB_COUNT);
 	}
 } s_hwPwmCalibAutoInstall;
-} // namespace (auto-install)
+} // namespace
 #endif
 
 namespace
@@ -252,7 +252,8 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& con
 
 	// Increment each time the compensation model changes — lets you confirm
 	// which firmware build produced a given test output.
-	static constexpr uint8_t COMPENSATION_REVISION = 7; // ..., 6=always split range>1023+cycle_num warning, 7=warn only once+warn only when 0<cycle_num<20
+	static constexpr uint8_t COMPENSATION_REVISION =
+		7; // ..., 6=always split range>1023+cycle_num warning, 7=warn only once+warn only when 0<cycle_num<20
 	debug_i("PWM Constructor Configuration [compensation rev %u]:", COMPENSATION_REVISION);
 	debug_i("  Timer: num=%d, resolution=%d, freq=%d, speed_mode=%d, clk_cfg=%d", timer_.timer_num, timer_.resolution,
 			timer_.frequency, timer_.speed_mode, timer_.clk_cfg);
@@ -640,8 +641,8 @@ bool Esp32HardwarePwm::initialize()
 	for(auto& q : fadeQueues_) {
 		q.reloadOverheadUs = overhead;
 	}
-	debug_i("Reload overhead correction: %lu µs/step (1500 µs dispatch + 1 × period=%lu µs)",
-			(unsigned long)overhead, (unsigned long)(1000000UL / timer_.frequency));
+	debug_i("Reload overhead correction: %lu µs/step (1500 µs dispatch + 1 × period=%lu µs)", (unsigned long)overhead,
+			(unsigned long)(1000000UL / timer_.frequency));
 
 	return true;
 }
@@ -790,8 +791,8 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 	auto applyCorrections = [&](FadeEntry& entry) {
 		const uint32_t freq = timer_.frequency;
 		const uint32_t range = (entry.targetDuty >= pins_[channel_idx].targetDuty)
-			? (entry.targetDuty - pins_[channel_idx].targetDuty)
-			: (pins_[channel_idx].targetDuty - entry.targetDuty);
+								   ? (entry.targetDuty - pins_[channel_idx].targetDuty)
+								   : (pins_[channel_idx].targetDuty - entry.targetDuty);
 
 		// --- 2. Quantization carry ---
 		// cycle_num = floor(freq × t_ms / (1000 × range)) is the number of PWM
@@ -1000,8 +1001,8 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 	// Determine the duty level this entry will start from: the target of the
 	// last queued entry, or the channel's current target if the queue is empty.
 	uint32_t fromDuty = (currentCount > 0)
-		? q.entries[(q.tail == 0 ? (uint16_t)q.entries.size() : q.tail) - 1].targetDuty
-		: pins_[channel].targetDuty;
+							? q.entries[(q.tail == 0 ? (uint16_t)q.entries.size() : q.tail) - 1].targetDuty
+							: pins_[channel].targetDuty;
 
 	uint32_t rangeAbs = (targetDuty >= fromDuty) ? (targetDuty - fromDuty) : (fromDuty - targetDuty);
 
@@ -1033,9 +1034,7 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 	// -----------------------------------------------------------------------
 
 	// Compute cycle_num for this fade (same value for any proportional sub-segment).
-	uint64_t cycle_num = (rangeAbs > 0)
-		? ((uint64_t)timer_.frequency * fadeTimeMs) / (1000ULL * rangeAbs)
-		: 0;
+	uint64_t cycle_num = (rangeAbs > 0) ? ((uint64_t)timer_.frequency * fadeTimeMs) / (1000ULL * rangeAbs) : 0;
 
 	// Warn when cycle_num is in the timing-error regime (1 ≤ cycle_num < SPLIT_STEP_QUALITY).
 	// In this range the LEDC integer truncation error is large (cycle_num=4 → ~20% short).
@@ -1054,8 +1053,7 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 		debug_w("queueFadeChan: ch%d cycle_num=%llu (< %lu) — fade may be %lld ms short (hw limit). "
 				"Fix: increase fadeTimeMs, lower resolution, or raise frequency to >= %lu Hz",
 				channel, (unsigned long long)cycle_num, (unsigned long)SPLIT_STEP_QUALITY,
-				(long long)((int64_t)fadeTimeMs - (int64_t)(t_actual_us / 1000)),
-				(unsigned long)freq_min);
+				(long long)((int64_t)fadeTimeMs - (int64_t)(t_actual_us / 1000)), (unsigned long)freq_min);
 	}
 
 	// Split when range > 1023 (scale > 1) AND cycle_num >= 1 (not below hw minimum).
@@ -1072,8 +1070,7 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 				onQueueError_(channel, QueueError::SPLIT_DEGRADED);
 			nSegs = 1;
 		} else {
-			debug_d("queueFadeChan: channel %d queue full (%d entries, need %d slots)",
-					channel, currentCount, nSegs);
+			debug_d("queueFadeChan: channel %d queue full (%d entries, need %d slots)", channel, currentCount, nSegs);
 			if(onQueueError_)
 				onQueueError_(channel, QueueError::QUEUE_FULL);
 			return false;
