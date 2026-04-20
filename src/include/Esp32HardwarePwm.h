@@ -45,16 +45,13 @@
 
 // ---------------------------------------------------------------------------
 // Debug level control for Esp32HardwarePwm
-// Define HW_PWM_DEBUG before including this header or via compiler flag.
-// Uses Sming's ENABLE_DEBUG mechanism (debug_progmem.h) in the .cpp file.
-//   0 = no logging
+// Set HW_PWM_DEBUG via compiler flag (e.g. -DHW_PWM_DEBUG=2) or in component.mk.
+// This define is intentionally NOT set here — it only applies to Esp32HardwarePwm.cpp.
+//   0 = no logging (default)
 //   1 = errors only   (debug_e)
 //   2 = errors + info (debug_e, debug_i)
 //   3 = full          (debug_e, debug_i, debug_d)
 // ---------------------------------------------------------------------------
-#ifndef ENABLE_DEBUG
-#define ENABLE_DEBUG 1
-#endif
 
 /**
  * @brief ESP32 Hardware PWM driver wrapping the LEDC peripheral.

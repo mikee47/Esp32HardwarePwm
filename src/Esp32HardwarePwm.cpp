@@ -3,6 +3,11 @@
  */
 
 #include "Esp32HardwarePwm.h"
+// HW_PWM_DEBUG controls logging for this component only (0=off, 1=errors, 2=+info, 3=full).
+// Set via -DHW_PWM_DEBUG=<level> in your Makefile or component.mk (default: 0).
+#ifndef HW_PWM_DEBUG
+#define HW_PWM_DEBUG 0
+#endif
 #undef ENABLE_DEBUG
 #define ENABLE_DEBUG HW_PWM_DEBUG
 #include <debug_progmem.h>
@@ -1046,9 +1051,14 @@ bool Esp32HardwarePwm::queueFadeChan(uint8_t channel, uint32_t targetDuty, uint3
 	if(rangeAbs > 0 && cycle_num > 0 && cycle_num < SPLIT_STEP_QUALITY && !q.warnedLowCycleNum) {
 		q.warnedLowCycleNum = true;
 		uint64_t t_actual_us = (cycle_num * (uint64_t)rangeAbs * 1000000ULL) / timer_.frequency;
-		debug_w("queueFadeChan: ch%d cycle_num=%llu (< %lu) — fade may be %lld ms short (hw limit)",
+		// Minimum frequency needed to reach cycle_num == SPLIT_STEP_QUALITY for this fade:
+		//   freq_min = SPLIT_STEP_QUALITY * 1000 * rangeAbs / fadeTimeMs
+		uint32_t freq_min = (uint32_t)(((uint64_t)SPLIT_STEP_QUALITY * 1000ULL * rangeAbs) / fadeTimeMs);
+		debug_w("queueFadeChan: ch%d cycle_num=%llu (< %lu) — fade may be %lld ms short (hw limit). "
+				"Fix: increase fadeTimeMs, lower resolution, or raise frequency to >= %lu Hz",
 				channel, (unsigned long long)cycle_num, (unsigned long)SPLIT_STEP_QUALITY,
-				(long long)((int64_t)fadeTimeMs - (int64_t)(t_actual_us / 1000)));
+				(long long)((int64_t)fadeTimeMs - (int64_t)(t_actual_us / 1000)),
+				(unsigned long)freq_min);
 	}
 
 	// Split when range > 1023 (scale > 1) AND cycle_num >= 1 (not below hw minimum).
