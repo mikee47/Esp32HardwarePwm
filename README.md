@@ -463,7 +463,7 @@ effects across multiple configurations in a single run.
 
 ## License
 
-This library is provided under the LGPL v3 license as part of the Sming Framework Project.
+This library is provided under the LGPL v2.1 or higher license as part of the Sming Framework Project.
 
 ## References
 
