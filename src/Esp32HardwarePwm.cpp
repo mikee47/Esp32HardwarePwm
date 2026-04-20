@@ -170,7 +170,7 @@ void Esp32HardwarePwm::steadyFadeTimerCb(void* arg)
 	auto* ctx = static_cast<SteadyFadeContext*>(arg);
 	auto* self = ctx->self;
 	uint8_t channel_idx = ctx->channel_idx;
-	self->pendingFadeCallbacks_ |= (1u << channel_idx);
+	self->pendingFadeCallbacks_.fetch_or(1u << channel_idx, std::memory_order_relaxed);
 	if(!self->fadeCallbackQueued_) {
 		self->fadeCallbackQueued_ = true;
 		System.queueCallback(Esp32HardwarePwm::dispatchFadeCallbacks, reinterpret_cast<uint32_t>(self));
@@ -685,7 +685,7 @@ bool IRAM_ATTR Esp32HardwarePwm::fadeDoneCallback(const ledc_cb_param_t* param, 
 	if(i < self->pins_.size()) {
 		self->pins_[i].currentDuty = self->pins_[i].targetDuty;
 		self->fadeDone_[i] = true;
-		self->pendingFadeCallbacks_ |= (1u << i);
+		self->pendingFadeCallbacks_.fetch_or(1u << i, std::memory_order_relaxed);
 		if(!self->fadeCallbackQueued_) {
 			self->fadeCallbackQueued_ = true;
 			System.queueCallback(dispatchFadeCallbacks, reinterpret_cast<uint32_t>(self));
@@ -734,9 +734,9 @@ void Esp32HardwarePwm::dispatchFadeCallbacks(uint32_t param)
 	auto* self = reinterpret_cast<Esp32HardwarePwm*>(param);
 	self->fadeCallbackQueued_ = false;
 
-	// Snapshot and clear the bitmask atomically in task context
-	uint32_t pending = self->pendingFadeCallbacks_;
-	self->pendingFadeCallbacks_ = 0;
+	// Atomically snapshot-and-clear: any ISR firing between the load and the
+	// clear would be lost with two separate operations.
+	uint32_t pending = self->pendingFadeCallbacks_.exchange(0, std::memory_order_acq_rel);
 
 	for(uint8_t i = 0; i < self->pins_.size(); ++i) {
 		if(!(pending & (1u << i)))
@@ -863,7 +863,7 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 		fadeDone_[channel_idx] = false;
 		q.activeIsIntermediate = entry.isPartial;
 		if(entry.fadeTimeMs == 0) {
-			pendingFadeCallbacks_ |= (1u << channel_idx);
+			pendingFadeCallbacks_.fetch_or(1u << channel_idx, std::memory_order_relaxed);
 			if(!fadeCallbackQueued_) {
 				fadeCallbackQueued_ = true;
 				System.queueCallback(dispatchFadeCallbacks, reinterpret_cast<uint32_t>(this));
