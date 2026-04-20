@@ -9,15 +9,19 @@
  * All files of the Sming Core are provided under the LGPL v3 license.
  *
  * This library wraps the ESP32 LEDC peripheral to provide hardware PWM with:
- * - Configurable duty resolution (1-20 bits) and frequency
+ * - Configurable duty resolution (1–20 bits) and frequency
  * - Multiple independent instances with distinct timer configurations
  * - Phase shifting (hpoint) for EMI/noise/power-spike reduction
  * - Spread spectrum modulation
  * - Hardware-accelerated linear fading
+ * - Per-channel FIFO and CYCLIC fade queues with automatic sequencing
+ * - Split of large-range fades to work around the LEDC step_num ≤ 1023 limit
+ * - Per-reload timing compensation to reduce accumulated latency in queued sequences
+ * - Application callbacks: fade-done, queue-empty, cyclic-wrap, queue-error
  */
 
 /** @defgroup esp32_hw_pwm ESP32 Hardware PWM
- *  @brief    ESP32 LEDC hardware PWM driver
+ *  @brief    ESP32 LEDC hardware PWM driver with fade queue support
  *  @{
  */
 
@@ -30,6 +34,8 @@
 #include <array>
 #include <esp_attr.h>
 #include <Delegate.h>
+#include <SimpleTimer.h>
+#include <memory>
 
 // ---------------------------------------------------------------------------
 // Per-channel fade queue depth — override before including this header.
@@ -40,30 +46,50 @@
 
 // ---------------------------------------------------------------------------
 // Debug level control for Esp32HardwarePwm
-// Define HW_PWM_DEBUG before including this header or via compiler flag.
-// Uses Sming's ENABLE_DEBUG mechanism (debug_progmem.h) in the .cpp file.
-//   0 = no logging
+// Set HW_PWM_DEBUG via compiler flag (e.g. -DHW_PWM_DEBUG=2) or in component.mk.
+// This define is intentionally NOT set here — it only applies to Esp32HardwarePwm.cpp.
+//   0 = no logging (default)
 //   1 = errors only   (debug_e)
 //   2 = errors + info (debug_e, debug_i)
 //   3 = full          (debug_e, debug_i, debug_d)
 // ---------------------------------------------------------------------------
-#ifndef ENABLE_DEBUG
-#define ENABLE_DEBUG 1
-#endif
 
 /**
- * @brief ESP32 Hardware PWM class
- * 
- * This class provides a C++ wrapper around the ESP32 LEDC PWM functionality.
- * 
- * Key features:
- * - Support for different frequencies and duty resolutions
- * - Phase shifting for EMI reduction
- * - Hardware fade support
- * - Thread-safe operations
- * - RAII resource management
- * 
- * @note This class is designed specifically for ESP32 architecture
+ * @brief ESP32 Hardware PWM driver wrapping the LEDC peripheral.
+ *
+ * Provides a channel-indexed interface over the ESP32 LEDC hardware with:
+ *
+ * **Basic PWM**
+ * - Arbitrary duty resolution (1–20 bit) and frequency per timer
+ * - Instantaneous duty set (`setDutyChan`) and percentage helpers
+ * - Phase shifting (hpoint) per channel — off, auto-distributed, or manual
+ * - Spread spectrum modulation for EMI reduction
+ *
+ * **Hardware fading**
+ * - Single-shot linear fades: `fadeToValueChan` / `fadeToPercentChan`
+ * - Automatic splitting of large-range fades to avoid the LEDC
+ *   `step_num ≤ 1023` quantisation limit (up to −18 % timing error at 12-bit
+ *   without splitting)
+ *
+ * **Fade queue**
+ * - Per-channel ring-buffer queue (`queueFadeChan`) in FIFO or CYCLIC mode
+ * - FIFO: auto-starts on first entry; fires `onQueueEmpty` when drained
+ * - CYCLIC: seeded then started with `startQueue`; fires `onCyclicWrap` on
+ *   each loop
+ * - Per-reload timing correction (`reloadOverheadUs`) to compensate ISR→task
+ *   dispatch latency accumulating over many queued steps
+ * - `onFadeDone` callback after every individual fade (including queue steps)
+ * - `onQueueError` callback for `QUEUE_FULL` and `SPLIT_DEGRADED` conditions
+ *
+ * **Safe teardown**
+ * - `hasPendingCallbacks()` lets callers defer `delete` until all queued
+ *   task-context dispatches have drained, preventing use-after-free
+ *
+ * Channel index is the 0-based position in the `pins[]` vector passed to the
+ * constructor, independent of GPIO number or LEDC hardware channel number.
+ *
+ * @note RAII — all LEDC resources are released in the destructor.
+ * @note Not copyable or movable.
  */
 class Esp32HardwarePwm
 {
@@ -82,6 +108,12 @@ public:
 	enum class QueueMode : uint8_t {
 		FIFO,   ///< Queue drains and stops; onQueueEmpty fires when exhausted
 		CYCLIC, ///< Playback loops back to entry 0 endlessly; onCyclicWrap fires on each loop
+	};
+
+	/** @brief Error codes delivered to the onQueueError callback */
+	enum class QueueError : uint8_t {
+		QUEUE_FULL,		///< No space in the queue; the fade was not enqueued
+		SPLIT_DEGRADED, ///< Fade needed splitting but segments didn't fit; pushed unsplit (timing accuracy reduced)
 	};
 
 	// -----------------------------------------------------------------------
@@ -347,7 +379,27 @@ public:
 		return queueFadeChan(channel, static_cast<uint32_t>(targetPct / 100.0f * getMaxDuty()), fadeTimeMs);
 	}
 
-	/** @brief Return number of entries currently in the queue for a channel */
+	/** @brief Set duty cycle for a channel using CIE 1931 perceptual percentage (0.0–100.0).
+	 * Converts a perceptually-uniform lightness value to a linear hardware duty.
+	 */
+	bool setDutyChanCiePercent(uint8_t channel, DutyCycle percentage, bool update_immediately = true)
+	{
+		return setDutyChan(channel, static_cast<uint32_t>(cie1931Linear(percentage) * getMaxDuty()),
+						   update_immediately);
+	}
+
+	/** @brief Fade a channel to a CIE 1931 perceptual percentage target (0.0–100.0). */
+	bool fadeToPercentChanCie(uint8_t channel_idx, DutyCycle target_pct, uint32_t fade_time_ms)
+	{
+		return fadeToValueChan(channel_idx, static_cast<uint32_t>(cie1931Linear(target_pct) * getMaxDuty()),
+							   fade_time_ms);
+	}
+
+	/** @brief Enqueue a fade on a channel to a CIE 1931 perceptual percentage target (0.0–100.0). */
+	bool queueFadeChanCiePercent(uint8_t channel, DutyCycle targetPct, uint32_t fadeTimeMs)
+	{
+		return queueFadeChan(channel, static_cast<uint32_t>(cie1931Linear(targetPct) * getMaxDuty()), fadeTimeMs);
+	}
 	uint16_t getQueueEntries(uint8_t channel) const;
 
 	/** @brief Clear the queue for a channel and reset mode to FIFO.
@@ -383,6 +435,48 @@ public:
 	/** @brief Returns true if the queue starts automatically on first queueFadeChan() call */
 	bool getQueueAutoStart(uint8_t channel) const;
 
+	// -----------------------------------------------------------------------
+	// Hardware calibration
+	// -----------------------------------------------------------------------
+
+	/**
+	 * @brief Per-(frequency, resolution) measured reload overhead entry.
+	 *
+	 * Generated by TimingTest_HwPWM: the measured per-step overhead is the
+	 * model value plus the latPerStep residual from the CH1 column:
+	 *   overheadUs = model + latPerStep_us   (clamped to 0 if negative)
+	 */
+	struct CalibrationEntry {
+		uint32_t frequency;			 ///< PWM frequency in Hz
+		ledc_timer_bit_t resolution; ///< Timer resolution
+		uint32_t overheadUs;		 ///< Measured per-reload overhead (µs)
+	};
+
+	/**
+	 * @brief Install a hardware-measured calibration table.
+	 *
+	 * When a (frequency, resolution) pair matches an entry, its overheadUs
+	 * is used instead of the formula (1500 µs + 1 × period).  Call once
+	 * before constructing any Esp32HardwarePwm instance — the pointer is
+	 * stored but not copied, so the table must remain valid for the
+	 * lifetime of the application.
+	 *
+	 * @param table  Pointer to CalibrationEntry array
+	 * @param count  Number of entries
+	 */
+	static void setCalibrationTable(const CalibrationEntry* table, size_t count);
+
+	/** @brief Override the per-reload overhead used to correct queued fade durations.
+	 * Normally auto-computed as (1 PWM period + DISPATCH_LATENCY_US) by the
+	 * constructor and by setFrequency().  Set to 0 to disable correction.
+	 * @param channel Channel index
+	 * @param overheadUs Overhead to deduct per reload, in microseconds
+	 */
+	void setReloadOverheadUs(uint8_t channel, uint32_t overheadUs);
+
+	/** @brief Get the per-reload overhead currently configured for a channel */
+	uint32_t getReloadOverheadUs(uint8_t channel) const;
+
 	/** @brief Callback fired after every individual fade completes (even if more are queued) */
 	void setOnFadeDoneCallback(Delegate<void(uint8_t)> cb)
 	{
@@ -399,6 +493,33 @@ public:
 	void setOnCyclicWrapCallback(Delegate<void(uint8_t)> cb)
 	{
 		onCyclicWrap_ = cb;
+	}
+
+	/** @brief Callback fired when a queueFadeChan call fails or degrades.
+	 *  The callback receives the channel index and the QueueError reason.
+	 *  For QUEUE_FULL the fade was not enqueued; for SPLIT_DEGRADED the fade
+	 *  was enqueued unsplit (hardware timing accuracy may be reduced). */
+	void setOnQueueErrorCallback(Delegate<void(uint8_t, QueueError)> cb)
+	{
+		onQueueError_ = cb;
+	}
+
+	/** @brief Returns true if there are unprocessed ISR results or a
+	 *  dispatchFadeCallbacks task already queued in the Sming task queue.
+	 *
+	 *  Use this before deleting the object from task context to ensure no
+	 *  stale task-queue entry still holds a pointer to it:
+	 *  @code
+	 *    if(pwm->hasPendingCallbacks()) {
+	 *        System.queueCallback(tryTeardown);  // re-defer
+	 *        return;
+	 *    }
+	 *    delete pwm;
+	 *  @endcode
+	 */
+	bool hasPendingCallbacks() const
+	{
+		return pendingFadeCallbacks_ != 0 || fadeCallbackQueued_;
 	}
 
 	// -----------------------------------------------------------------------
@@ -461,6 +582,7 @@ private:
 	struct FadeEntry {
 		uint32_t targetDuty;
 		uint32_t fadeTimeMs;
+		bool isPartial = false; ///< True for intermediate segments of a split long-range fade
 	};
 
 	struct ChannelFadeQueue {
@@ -471,6 +593,11 @@ private:
 		uint16_t cycleLen = 0;			///< CYCLIC: number of entries in the cycle
 		QueueMode mode = QueueMode::FIFO;
 		bool autoStart = true; ///< If true, playback starts on first queueFadeChan(); false requires startQueue()
+		uint32_t reloadOverheadUs = 0;	 ///< Per-reload overhead subtracted from each step (µs)
+		int32_t carryUs = 0;			   ///< Sub-ms accumulator for reload overhead correction
+		int32_t quantCarryUs = 0;		   ///< Sub-µs accumulator for cycle_num truncation correction
+		bool activeIsIntermediate = false; ///< True when the executing entry is a partial (intermediate) split segment
+		bool warnedLowCycleNum = false;	///< Suppress repeat low-cycle_num warnings for this channel
 	};
 
 	struct PinConfig {
@@ -481,6 +608,14 @@ private:
 		int hpoint = 0;							 ///< Phase shift hpoint
 		bool isActive = false;					 ///< True when channel is running
 	};
+
+	// Context block passed to steadyFadeTimerCb — one per channel, stable address.
+	struct SteadyFadeContext {
+		Esp32HardwarePwm* self;
+		uint8_t channel_idx;
+	};
+	std::vector<SteadyFadeContext> steadyFadeCtx_;
+	std::vector<std::unique_ptr<SimpleTimer>> steadyFadeTimers_;
 
 	TimerConfig timer_;
 	SpreadSpectrumConfig spreadSpectrum_;
@@ -502,6 +637,7 @@ private:
 	Delegate<void(uint8_t)> onFadeDone_;
 	Delegate<void(uint8_t)> onQueueEmpty_;
 	Delegate<void(uint8_t)> onCyclicWrap_;
+	Delegate<void(uint8_t, QueueError)> onQueueError_;
 
 	/**
      * @brief Initialize PWM instance
@@ -535,7 +671,9 @@ private:
 	}
 
 	/**
-     * @brief Calculate hpoint for phase shifting
+     * @brief Calculate hpoint for phase shifting 
+	 *        this calculates hpoits such that n channels
+	 *        are evenly distributed across the PWM period
      * @param channel_index Index of the channel
      * @return Calculated hpoint value
      */
@@ -570,8 +708,33 @@ private:
 	// Start the next fade from the queue; returns false if queue empty
 	bool startNextFade(uint8_t channel_idx);
 
+	// Raw LEDC hardware fade — used by startNextFade only; bypasses queue and split logic
+	bool fadeHwChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms);
+
 	// esp_timer callback — runs in task context, static wrapper required for C function pointer
 	static void spreadSpectrumTimerCb(void* arg);
+
+	// SimpleTimer callback for zero-range (x→x) fades — fires after fadeTimeMs elapses
+	static void steadyFadeTimerCb(void* arg);
+
+	// -----------------------------------------------------------------
+	// CIE 1931 perceptual correction
+	// Maps a perceptual lightness percentage (0–100) to a linear
+	// duty cycle value using the standard CIE 1931 formula:
+	//   L <= 8  →  Y = L / 902.3
+	//   L  > 8  →  Y = ((L + 16) / 116)^3
+	// -----------------------------------------------------------------
+	static float cie1931Linear(float L)
+	{
+		if(L <= 0.0f)
+			return 0.0f;
+		if(L >= 100.0f)
+			return 1.0f;
+		if(L <= 8.0f)
+			return L / 902.3f;
+		float t = (L + 16.0f) / 116.0f;
+		return t * t * t;
+	}
 };
 
 /** @} */
