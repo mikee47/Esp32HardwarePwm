@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <vector>
 #include <driver/ledc.h>
+#include <esp_timer.h>
 #include <soc/soc_caps.h>
 #include <array>
 #include <esp_attr.h>
@@ -619,6 +620,7 @@ private:
 
 	TimerConfig timer_;
 	SpreadSpectrumConfig spreadSpectrum_;
+	esp_timer_handle_t spreadSpectrumTimer_ = nullptr;
 	PhaseShiftConfig phaseShift_;
 	std::vector<PinConfig> pins_;
 	std::vector<ChannelFadeQueue> fadeQueues_;
