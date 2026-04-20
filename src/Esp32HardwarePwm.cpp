@@ -849,6 +849,11 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 		applyCorrections(entry);
 		if(entry.targetDuty != pins_[channel_idx].targetDuty)
 			return false;
+		// Mark channel as "fading" so isFadingChan() returns true for the
+		// duration of the steady-hold.  Without this a caller can re-enter
+		// fadeToValueChan / queueFadeChan before the timer fires, corrupt the
+		// queue, and lose the pending callback.
+		fadeDone_[channel_idx] = false;
 		q.activeIsIntermediate = entry.isPartial;
 		if(entry.fadeTimeMs == 0) {
 			pendingFadeCallbacks_ |= (1u << channel_idx);
