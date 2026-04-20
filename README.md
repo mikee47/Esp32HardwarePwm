@@ -142,8 +142,8 @@ Esp32HardwarePwm pwm(led_pins, Esp32HardwarePwm::Config{
 
 void init() {
     if (pwm.isInitialized()) {
-        pwm.fadeToValueChan(0, pwm.getMaxDuty(), 2000);  // fade to 100% over 2 s
-        pwm.fadeToPercentChan(1, 50.0f, 1500);           // fade to 50% over 1.5 s
+        pwm.fadeChan(0, pwm.getMaxDuty(), 2000);         // fade to 100% over 2 s
+        pwm.fadePercentChan(1, 50.0f, 1500);               // fade to 50% over 1.5 s
     }
 }
 ```
@@ -203,13 +203,15 @@ Channels are zero-indexed in the order the pins were supplied to the constructor
 ```cpp
 bool     setDutyChan(uint8_t channel, uint32_t duty, bool update_immediately = true);
 uint32_t getDutyChan(uint8_t channel);
+bool     setDutyChanPercent(uint8_t channel, float pct, bool update_immediately = true, bool cie = false);
+float    getDutyChanPercent(uint8_t channel, bool cie = false);  // cie=true → inverse CIE 1931
 bool     setPhaseShiftChan(uint8_t channel, uint32_t phase_shift, bool update_immediately = true);
 ```
 
 ##### Pin interface (legacy)
 ```cpp
-bool     setDuty(uint8_t pin, uint32_t duty, bool update_immediately = true);
-uint32_t getDuty(uint8_t pin);
+bool     setDutyPin(uint8_t pin, uint32_t duty, bool update_immediately = true);
+uint32_t getDutyPin(uint8_t pin);
 bool     analogWrite(uint8_t pin, uint32_t duty);
 ```
 
@@ -248,10 +250,10 @@ Fade support is installed automatically on first use.
 bool enableFade();    // install LEDC fade ISR (called automatically by fade methods)
 void disableFade();
 
-// Fade to an absolute duty value
-bool fadeToValueChan(uint8_t channel, uint32_t target_duty, uint32_t fade_time_ms);
-// Fade to a percentage (0.0 – 100.0)
-bool fadeToPercentChan(uint8_t channel, float target_pct, uint32_t fade_time_ms);
+// Immediate fade (resets queue, starts now); queue=true enqueues instead
+bool fadeChan(uint8_t channel, uint32_t target_duty, uint32_t fade_time_ms, bool queue = false);
+// Same but target is a percentage (0.0 – 100.0); cie=true applies CIE 1931 correction
+bool fadePercentChan(uint8_t channel, float target_pct, uint32_t fade_time_ms, bool cie = false, bool queue = false);
 // Returns true while a hardware fade is in progress
 bool isFadingChan(uint8_t channel) const;
 ```
@@ -266,7 +268,7 @@ be changed per-channel at runtime before the queue is filled.
 
 | Mode | Behaviour | Auto-start |
 |------|-----------|------------|
-| `FIFO` (default) | Entries play once in order; `onQueueEmpty` fires when exhausted | Yes — playback starts on first `queueFadeChan()` call |
+| `FIFO` (default) | Entries play once in order; `onQueueEmpty` fires when exhausted | Yes — playback starts on first `fadeChan(..., queue=true)` call |
 | `CYCLIC` | Entries loop endlessly back to entry 0; `onCyclicWrap` fires each loop | No — call `startQueue()` after seeding all entries |
 
 ##### Queue management
@@ -290,9 +292,9 @@ void     resetQueue(uint8_t channel);            // clear queue, preserve capaci
 ##### Enqueueing and starting
 
 ```cpp
-// Enqueue a fade (absolute duty or percentage)
-bool queueFadeChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs);
-bool queueFadePercentChan(uint8_t channel, float targetPct, uint32_t fadeTimeMs);
+// Enqueue a fade: fadeChan/fadePercentChan with queue=true
+bool fadeChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs, bool queue = false);
+bool fadePercentChan(uint8_t channel, float targetPct, uint32_t fadeTimeMs, bool cie = false, bool queue = false);
 
 // Explicitly start a CYCLIC queue (or restart an idle FIFO queue)
 bool startQueue(uint8_t channel);
@@ -315,9 +317,9 @@ pwm.setOnCyclicWrapCallback([](uint8_t ch) { ... });
 
 ```cpp
 pwm.setQueueMode(1, Esp32HardwarePwm::QueueMode::CYCLIC);
-pwm.queueFadePercentChan(1, 100.0f, 1000);
-pwm.queueFadePercentChan(1,   0.0f, 1000);
-pwm.queueFadePercentChan(1,  50.0f, 1000);
+pwm.fadePercentChan(1, 100.0f, 1000, false, true);
+pwm.fadePercentChan(1,   0.0f, 1000, false, true);
+pwm.fadePercentChan(1,  50.0f, 1000, false, true);
 pwm.startQueue(1);  // must be called after seeding; CYCLIC does not auto-start
 ```
 
@@ -375,7 +377,7 @@ than requested.  For example:
 The library warns once per channel whenever `1 ≤ cycle_num < 20`:
 
 ```
-queueFadeChan: ch0 cycle_num=3 (< 20) — fade may be 929 ms short (hw limit).
+fadeChan: ch0 cycle_num=3 (< 20) — fade may be 929 ms short (hw limit).
 Fix: increase fadeTimeMs, lower resolution, or raise frequency to >= 20475 Hz
 ```
 

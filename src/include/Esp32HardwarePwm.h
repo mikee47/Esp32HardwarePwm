@@ -68,13 +68,13 @@
  * - Spread spectrum modulation for EMI reduction
  *
  * **Hardware fading**
- * - Single-shot linear fades: `fadeToValueChan` / `fadeToPercentChan`
+ * - Single-shot linear fades: `fadeChan` / `fadePercentChan`
  * - Automatic splitting of large-range fades to avoid the LEDC
  *   `step_num ≤ 1023` quantisation limit (up to −18 % timing error at 12-bit
  *   without splitting)
  *
  * **Fade queue**
- * - Per-channel ring-buffer queue (`queueFadeChan`) in FIFO or CYCLIC mode
+ * - Per-channel ring-buffer queue (`fadeChan(..., queue=true)`) in FIFO or CYCLIC mode
  * - FIFO: auto-starts on first entry; fires `onQueueEmpty` when drained
  * - CYCLIC: seeded then started with `startQueue`; fires `onCyclicWrap` on
  *   each loop
@@ -273,29 +273,32 @@ public:
      * @param channel Channel index
      * @param percentage Duty cycle percentage (0.0 to 100.0)
      * @param update_immediately Apply changes immediately (default: true)
+     * @param cie Apply CIE 1931 perceptual correction (default: false)
      * @return true if successful, false otherwise
      */
-	bool setDutyChanPercent(uint8_t channel, DutyCycle percentage, bool update_immediately = true)
+	bool setDutyChanPercent(uint8_t channel, DutyCycle percentage, bool update_immediately = true, bool cie = false)
 	{
 		if(percentage < 0.0f)
 			percentage = 0.0f;
 		if(percentage > 100.0f)
 			percentage = 100.0f;
-		uint32_t duty = static_cast<uint32_t>(percentage * getMaxDuty() / 100.0f);
-		return setDutyChan(channel, duty, update_immediately);
+		float Y = cie ? cie1931Linear(percentage) : (percentage / 100.0f);
+		return setDutyChan(channel, static_cast<uint32_t>(Y * getMaxDuty()), update_immediately);
 	}
 
 	/** @brief Get duty cycle for a channel as a percentage
      * @param channel Channel index
+     * @param cie Return CIE 1931 perceptual percentage (default: false = linear)
      * @return Duty cycle percentage (0.0 to 100.0)
      */
-	DutyCycle getDutyChanPercent(uint8_t channel)
+	DutyCycle getDutyChanPercent(uint8_t channel, bool cie = false)
 	{
 		uint32_t duty = getDutyChan(channel);
 		uint32_t max_duty = getMaxDuty();
 		if(max_duty == 0)
 			return 0.0f;
-		return (static_cast<float>(duty) / max_duty) * 100.0f;
+		float Y = static_cast<float>(duty) / max_duty;
+		return cie ? cie1931Inverse(Y) : (Y * 100.0f);
 	}
 
 	/** @brief Set phase shift for a channel (absolute hpoint value)
@@ -331,21 +334,35 @@ public:
 	/** @brief Disable hardware fade functionality */
 	void disableFade();
 
-	/** @brief Start hardware linear fade on a channel (absolute target)
-     * @param channel_idx Channel index
-     * @param target_duty Target duty value (0 to getMaxDuty())
-     * @param fade_time_ms Duration in milliseconds
-     * @return true if started successfully
-     */
-	bool fadeToValueChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms);
+	/** @brief Hardware linear fade on a channel (absolute duty target).
+	 * @param channel_idx Channel index
+	 * @param target_duty Target duty value (0 to getMaxDuty())
+	 * @param fade_time_ms Duration in milliseconds
+	 * @param queue If false (default), resets the queue and starts immediately.
+	 *              If true, enqueues the fade for sequential playback.
+	 * @return true if started/enqueued successfully
+	 */
+	bool fadeChan(uint8_t channel_idx, uint32_t target_duty, uint32_t fade_time_ms, bool queue = false);
 
-	/** @brief Start hardware linear fade on a channel (percentage target)
-     * @param channel_idx Channel index
-     * @param target_pct Target duty as percentage (0.0–100.0)
-     * @param fade_time_ms Duration in milliseconds
-     * @return true if started successfully
-     */
-	bool fadeToPercentChan(uint8_t channel_idx, DutyCycle target_pct, uint32_t fade_time_ms);
+	/** @brief Hardware linear fade on a channel (percentage target).
+	 * @param channel_idx Channel index
+	 * @param target_pct Target duty as percentage (0.0–100.0)
+	 * @param fade_time_ms Duration in milliseconds
+	 * @param cie Apply CIE 1931 perceptual correction (default: false)
+	 * @param queue If false (default), resets the queue and starts immediately.
+	 *              If true, enqueues the fade for sequential playback.
+	 * @return true if started/enqueued successfully
+	 */
+	bool fadePercentChan(uint8_t channel_idx, DutyCycle target_pct, uint32_t fade_time_ms, bool cie = false,
+	                     bool queue = false)
+	{
+		if(target_pct < 0.0f)
+			target_pct = 0.0f;
+		if(target_pct > 100.0f)
+			target_pct = 100.0f;
+		float Y = cie ? cie1931Linear(target_pct) : (target_pct / 100.0f);
+		return fadeChan(channel_idx, static_cast<uint32_t>(Y * getMaxDuty()), fade_time_ms, queue);
+	}
 
 	/** @brief Returns true while a hardware fade is in progress on the given channel */
 	bool isFadingChan(uint8_t channel_idx) const;
@@ -363,45 +380,7 @@ public:
 	/** @brief Get current queue mode for a channel */
 	QueueMode getQueueMode(uint8_t channel) const;
 
-	/** @brief Enqueue a fade on a channel (absolute duty target).
-	 * For FIFO queues (autoStart=true, the default), playback starts automatically
-	 * on the first entry when the channel is idle.  For CYCLIC queues
-	 * (autoStart=false by default), call startQueue() after seeding all entries.
-	 * Returns false if the queue is full.
-	 */
-	bool queueFadeChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs);
 
-	/** @brief Enqueue a fade on a channel (percentage target, 0.0–100.0) */
-	bool queueFadePercentChan(uint8_t channel, float targetPct, uint32_t fadeTimeMs)
-	{
-		if(targetPct < 0.0f)
-			targetPct = 0.0f;
-		if(targetPct > 100.0f)
-			targetPct = 100.0f;
-		return queueFadeChan(channel, static_cast<uint32_t>(targetPct / 100.0f * getMaxDuty()), fadeTimeMs);
-	}
-
-	/** @brief Set duty cycle for a channel using CIE 1931 perceptual percentage (0.0–100.0).
-	 * Converts a perceptually-uniform lightness value to a linear hardware duty.
-	 */
-	bool setDutyChanCiePercent(uint8_t channel, DutyCycle percentage, bool update_immediately = true)
-	{
-		return setDutyChan(channel, static_cast<uint32_t>(cie1931Linear(percentage) * getMaxDuty()),
-						   update_immediately);
-	}
-
-	/** @brief Fade a channel to a CIE 1931 perceptual percentage target (0.0–100.0). */
-	bool fadeToPercentChanCie(uint8_t channel_idx, DutyCycle target_pct, uint32_t fade_time_ms)
-	{
-		return fadeToValueChan(channel_idx, static_cast<uint32_t>(cie1931Linear(target_pct) * getMaxDuty()),
-							   fade_time_ms);
-	}
-
-	/** @brief Enqueue a fade on a channel to a CIE 1931 perceptual percentage target (0.0–100.0). */
-	bool queueFadeChanCiePercent(uint8_t channel, DutyCycle targetPct, uint32_t fadeTimeMs)
-	{
-		return queueFadeChan(channel, static_cast<uint32_t>(cie1931Linear(targetPct) * getMaxDuty()), fadeTimeMs);
-	}
 	uint16_t getQueueEntries(uint8_t channel) const;
 
 	/** @brief Clear the queue for a channel and reset mode to FIFO.
@@ -434,7 +413,7 @@ public:
 	 */
 	void setQueueAutoStart(uint8_t channel, bool autoStart);
 
-	/** @brief Returns true if the queue starts automatically on first queueFadeChan() call */
+	/** @brief Returns true if the queue starts automatically on first fadeChan(..., queue=true) call */
 	bool getQueueAutoStart(uint8_t channel) const;
 
 	// -----------------------------------------------------------------------
@@ -497,7 +476,7 @@ public:
 		onCyclicWrap_ = cb;
 	}
 
-	/** @brief Callback fired when a queueFadeChan call fails or degrades.
+	/** @brief Callback fired when a fadeChan(queue=true) call fails or degrades.
 	 *  The callback receives the channel index and the QueueError reason.
 	 *  For QUEUE_FULL the fade was not enqueued; for SPLIT_DEGRADED the fade
 	 *  was enqueued unsplit (hardware timing accuracy may be reduced). */
@@ -528,13 +507,13 @@ public:
 	// Legacy interface — GPIO-pin-indexed (use channel interface for new code)
 	// -----------------------------------------------------------------------
 
-	/** @brief Set PWM duty cycle for a specific pin (legacy)
+	/** @brief Set PWM duty cycle for a specific pin (legacy pin-indexed interface)
      * @param pin GPIO pin number
      * @param duty Duty cycle value (0 to getMaxDuty())
      * @param update_immediately Apply changes immediately (default: true)
      * @return true if successful, false otherwise
      */
-	bool setDuty(uint8_t pin, uint32_t duty, bool update_immediately = true)
+	bool setDutyPin(uint8_t pin, uint32_t duty, bool update_immediately = true)
 	{
 		int idx = getPinIndex(pin);
 		if(idx < 0)
@@ -542,11 +521,11 @@ public:
 		return setDutyChan((uint8_t)idx, duty, update_immediately);
 	}
 
-	/** @brief Get PWM duty cycle for a specific pin (legacy)
+	/** @brief Get PWM duty cycle for a specific pin (legacy pin-indexed interface)
      * @param pin GPIO pin number
      * @return Current duty cycle value
      */
-	uint32_t getDuty(uint8_t pin)
+	uint32_t getDutyPin(uint8_t pin)
 	{
 		int idx = getPinIndex(pin);
 		if(idx < 0)
@@ -561,7 +540,7 @@ public:
      */
 	bool analogWrite(uint8_t pin, uint32_t duty)
 	{
-		return setDuty(pin, duty);
+		return setDutyPin(pin, duty);
 	}
 
 	/** @brief Start PWM output on a specific pin (legacy)
@@ -581,6 +560,9 @@ public:
 	void startAll();
 
 private:
+	/** @brief Internal: enqueue a fade (absolute duty). Used by fadeChan(). */
+	bool queueDutyChan(uint8_t channel, uint32_t targetDuty, uint32_t fadeTimeMs);
+
 	struct FadeEntry {
 		uint32_t targetDuty;
 		uint32_t fadeTimeMs;
@@ -594,7 +576,7 @@ private:
 		uint16_t count = 0;				///< FIFO: decrements on pop; CYCLIC: fixed after seeding
 		uint16_t cycleLen = 0;			///< CYCLIC: number of entries in the cycle
 		QueueMode mode = QueueMode::FIFO;
-		bool autoStart = true; ///< If true, playback starts on first queueFadeChan(); false requires startQueue()
+		bool autoStart = true; ///< If true, playback starts on first fadeChan(queue=true); false requires startQueue()
 		uint32_t reloadOverheadUs = 0;	 ///< Per-reload overhead subtracted from each step (µs)
 		int32_t carryUs = 0;			   ///< Sub-ms accumulator for reload overhead correction
 		int32_t quantCarryUs = 0;		   ///< Sub-µs accumulator for cycle_num truncation correction
@@ -740,6 +722,21 @@ private:
 			return L / 902.3f;
 		float t = (L + 16.0f) / 116.0f;
 		return t * t * t;
+	}
+
+	// CIE 1931 inverse: maps linear duty fraction Y (0–1) back to perceptual
+	// lightness L (0–100).  Inverse of cie1931Linear.
+	//   Y <= 0.008856  →  L = 903.3 × Y
+	//   Y  > 0.008856  →  L = 116 × ∛Y − 16
+	static float cie1931Inverse(float Y)
+	{
+		if(Y <= 0.0f)
+			return 0.0f;
+		if(Y >= 1.0f)
+			return 100.0f;
+		if(Y <= 0.008856f)
+			return Y * 903.3f;
+		return 116.0f * cbrtf(Y) - 16.0f;
 	}
 };
 

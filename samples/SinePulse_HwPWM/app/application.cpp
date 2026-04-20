@@ -77,7 +77,7 @@ void startChannel(uint8_t ch)
 	for(uint32_t i = 0; i < SEGMENTS; i++) {
 		float angle = 2.0f * float(M_PI) * float(i + 1) / float(SEGMENTS);
 		float target = PEAK_PCT * 0.5f * (1.0f - cosf(angle));
-		pwm.queueFadeChanCiePercent(ch, target, SEGMENT_MS);
+		pwm.fadePercentChan(ch, target, SEGMENT_MS, true, true);
 	}
 	pwm.startQueue(ch);
 	Serial.printf("CH%u started\n", (unsigned)ch);

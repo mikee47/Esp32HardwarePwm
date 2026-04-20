@@ -49,7 +49,7 @@ void startNextFade()
 {
 	// Alternate between fading to 100% and back to 0%
 	static bool countUp = true;
-	pwm.fadeToPercentChanCie(LED_CHANNEL, countUp ? 100.0f : 0.0f, FADE_TIME_MS);
+	pwm.fadePercentChan(LED_CHANNEL, countUp ? 100.0f : 0.0f, FADE_TIME_MS, true);
 	countUp = !countUp;
 }
 
@@ -82,7 +82,7 @@ SimpleTimer chaseTimer;
 	static uint8_t currentChannel = 0;
 
 	pwm.setDutyChanPercent(currentChannel, 100.0f);
-	pwm.fadeToPercentChan(currentChannel, 0.0f, CHASE_FADE_MS);
+	pwm.fadePercentChan(currentChannel, 0.0f, CHASE_FADE_MS);
 
 	currentChannel = (currentChannel + 1) % pwm.getPinCount();
 }
@@ -99,7 +99,7 @@ void init()
 
 	// Set default duty on every channel
 	for(uint8_t ch = 0; ch < pwm.getPinCount(); ++ch) {
-		pwm.setDutyChanCiePercent(ch, defaultDutyPercent[ch]);
+		pwm.setDutyChanPercent(ch, defaultDutyPercent[ch], true, true);
 	}
 
 	Serial << _F("PWM output set on all ") << pwm.getPinCount() << _F(" channels.") << endl;
