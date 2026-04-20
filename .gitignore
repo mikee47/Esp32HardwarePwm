@@ -59,7 +59,9 @@ out/
 *.iml
 
 # Working / review notes (not part of the shipped source)
-src/plan.md
+plan.md
+plan-*.prompt.md
+*.prompt.md
 src/review.md
 src/interfaceChange.md
 
