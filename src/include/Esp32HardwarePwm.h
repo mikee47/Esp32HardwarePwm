@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <vector>
 #include <driver/ledc.h>
@@ -519,7 +520,7 @@ public:
 	 */
 	bool hasPendingCallbacks() const
 	{
-		return pendingFadeCallbacks_ != 0 || fadeCallbackQueued_;
+		return pendingFadeCallbacks_.load(std::memory_order_relaxed) != 0 || fadeCallbackQueued_;
 	}
 
 	// -----------------------------------------------------------------------
@@ -630,7 +631,10 @@ private:
 	std::array<volatile bool, SOC_LEDC_CHANNEL_NUM> fadeDone_{};
 
 	// ISR → task handoff for fade completion
-	volatile uint32_t pendingFadeCallbacks_ = 0;
+	// Written from the LEDC fade ISR (potentially on either core) and
+	// read+cleared in task context — must be atomic to avoid torn reads
+	// on the dual-core ESP32.
+	std::atomic<uint32_t> pendingFadeCallbacks_{0};
 	volatile bool fadeCallbackQueued_ = false;
 
 	// Application-level callbacks
