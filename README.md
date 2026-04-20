@@ -351,6 +351,53 @@ generally reduces the error (more cycles to distribute), but the specific
 fade duration matters.  The maximum possible shortfall is one timer period
 (when the remainder equals `duty_levels − 1`).
 
+### 1a. Low `cycle_num` regime — large timing error and diagnostic warning
+
+The hardware parameter `cycle_num` is the number of full PWM timer cycles the
+LEDC peripheral spends at each duty step:
+
+```
+cycle_num = floor(freq_Hz × fade_ms / (1000 × duty_range))
+```
+
+where `duty_range` is the absolute difference between start and target duty
+values.  When `cycle_num` is small the integer truncation from `floor` is a
+large fraction of the true value, so the actual fade duration is much shorter
+than requested.  For example:
+
+| cycle_num | Typical timing error |
+|---|---|
+| 1 | up to −50 % |
+| 3 | up to −25 % |
+| 10 | up to −9 % |
+| ≥ 20 | < 5 % (library threshold) |
+
+The library warns once per channel whenever `1 ≤ cycle_num < 20`:
+
+```
+queueFadeChan: ch0 cycle_num=3 (< 20) — fade may be 929 ms short (hw limit).
+Fix: increase fadeTimeMs, lower resolution, or raise frequency to >= 20475 Hz
+```
+
+The warning includes the minimum frequency needed to reach `cycle_num == 20` for
+that specific `(fade_ms, duty_range)` combination — raising the frequency is the
+lowest-impact fix when the PWM period is not otherwise constrained.
+
+**What causes this?**  `cycle_num` decreases when:
+- The fade duration is short relative to the duty range (fast fades over a wide range).
+- The PWM frequency is low (long timer periods give fewer cycles per millisecond).
+- The duty resolution is high (more steps means more time needed per step).
+
+**How to fix it** — choose any combination that brings `cycle_num ≥ 20`:
+1. **Increase `fadeTimeMs`** — gives LEDC more total timer cycles to distribute.
+2. **Lower the duty resolution** — fewer steps means more cycles per step.
+3. **Raise the PWM frequency** to at least the value printed in the warning.
+
+`cycle_num == 0` is a separate case where the requested duration is shorter than
+one full timer cycle.  LEDC clamps to 1 cycle, so the fade runs *longer* than
+requested.  No warning is issued for this case because the error direction is
+reversed and the magnitude is bounded by one timer period.
+
 ### 2. Queue-reload latency (applies to every step when chaining short fades)
 
 When the LEDC fade-done ISR fires, the library posts a FreeRTOS message to the

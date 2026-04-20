@@ -35,6 +35,7 @@
 #include <esp_attr.h>
 #include <Delegate.h>
 #include <SimpleTimer.h>
+#include <memory>
 
 // ---------------------------------------------------------------------------
 // Per-channel fade queue depth — override before including this header.
@@ -92,7 +93,6 @@
  */
 class Esp32HardwarePwm
 {
-	friend void steadyFadeTimerCb(void* arg);
 public:
 	static constexpr uint8_t BadChannel = 0xff; ///< Invalid PWM channel indicator
 
@@ -612,8 +612,13 @@ private:
 		bool isActive = false;					 ///< True when channel is running
 	};
 
-	// Per-channel timer for steady (x->x) fades
-	std::vector<SimpleTimer*> steadyFadeTimers_;
+	// Context block passed to steadyFadeTimerCb — one per channel, stable address.
+	struct SteadyFadeContext {
+		Esp32HardwarePwm* self;
+		uint8_t           channel_idx;
+	};
+	std::vector<SteadyFadeContext>            steadyFadeCtx_;
+	std::vector<std::unique_ptr<SimpleTimer>> steadyFadeTimers_;
 
 	TimerConfig timer_;
 	SpreadSpectrumConfig spreadSpectrum_;
@@ -711,6 +716,9 @@ private:
 
 	// esp_timer callback — runs in task context, static wrapper required for C function pointer
 	static void spreadSpectrumTimerCb(void* arg);
+
+	// SimpleTimer callback for zero-range (x→x) fades — fires after fadeTimeMs elapses
+	static void steadyFadeTimerCb(void* arg);
 
 	// -----------------------------------------------------------------
 	// CIE 1931 perceptual correction

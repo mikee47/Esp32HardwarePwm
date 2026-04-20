@@ -165,11 +165,11 @@ uint32_t periodToFrequency(uint32_t period_us)
 // Steady (zero-range) fade timer callback
 // ---------------------------------------------------------------------------
 
-void steadyFadeTimerCb(void* arg)
+void Esp32HardwarePwm::steadyFadeTimerCb(void* arg)
 {
-	uintptr_t packed = reinterpret_cast<uintptr_t>(arg);
-	auto* self = reinterpret_cast<Esp32HardwarePwm*>(packed >> 8);
-	uint8_t channel_idx = static_cast<uint8_t>(packed & 0xFF);
+	auto* ctx = static_cast<SteadyFadeContext*>(arg);
+	auto* self = ctx->self;
+	uint8_t channel_idx = ctx->channel_idx;
 	self->pendingFadeCallbacks_ |= (1u << channel_idx);
 	if(!self->fadeCallbackQueued_) {
 		self->fadeCallbackQueued_ = true;
@@ -199,9 +199,12 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& con
 	for(auto& q : fadeQueues_) {
 		q.entries.resize(FADE_QUEUE_DEPTH);
 	}
-	steadyFadeTimers_.resize(pins.size(), nullptr);
+	steadyFadeCtx_.resize(pins.size());
+	for(uint8_t i = 0; i < pins.size(); ++i)
+		steadyFadeCtx_[i] = {this, i};
+	steadyFadeTimers_.resize(pins.size());
 	for(auto& t : steadyFadeTimers_)
-		t = new SimpleTimer();
+		t = std::make_unique<SimpleTimer>();
 
 	// basic sanity checks
 	if(pins.size() == 0) {
@@ -267,11 +270,6 @@ Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& con
 
 Esp32HardwarePwm::~Esp32HardwarePwm()
 {
-	for(auto& t : steadyFadeTimers_) {
-		delete t;
-		t = nullptr;
-	}
-
 	if(initialized_) {
 		// Stop all channels FIRST — ledc_stop aborts any in-progress hardware fade,
 		// preventing the fade-done ISR from firing after this object is destroyed.
@@ -858,9 +856,8 @@ bool Esp32HardwarePwm::startNextFade(uint8_t channel_idx)
 				System.queueCallback(dispatchFadeCallbacks, reinterpret_cast<uint32_t>(this));
 			}
 		} else {
-			uintptr_t packed = (reinterpret_cast<uintptr_t>(this) << 8) | channel_idx;
 			steadyFadeTimers_[channel_idx]
-				->initializeMs(entry.fadeTimeMs, steadyFadeTimerCb, reinterpret_cast<void*>(packed))
+				->initializeMs(entry.fadeTimeMs, steadyFadeTimerCb, &steadyFadeCtx_[channel_idx])
 				.startOnce();
 		}
 		return true;
