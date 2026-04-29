@@ -185,15 +185,9 @@ void Esp32HardwarePwm::steadyFadeTimerCb(void* arg)
 // Constructors / destructor
 // ---------------------------------------------------------------------------
 
-Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins) : Esp32HardwarePwm(pins, Config{})
+Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& config) timer_(config.timer),
+	spreadSpectrum_(config.spreadSpectrum), phaseShift_(config.phaseShift)
 {
-}
-
-Esp32HardwarePwm::Esp32HardwarePwm(std::vector<uint8_t>& pins, const Config& config)
-{
-	timer_ = config.timer;
-	spreadSpectrum_ = config.spreadSpectrum;
-	phaseShift_ = config.phaseShift;
 	pins_.resize(pins.size());
 	fadeQueues_.resize(pins.size());
 	for(auto& q : fadeQueues_) {

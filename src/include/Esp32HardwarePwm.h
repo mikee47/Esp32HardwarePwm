@@ -168,7 +168,9 @@ public:
      * @brief Construct PWM instance with default configuration
      * @param pins Vector of GPIO pins to control
      */
-	Esp32HardwarePwm(std::vector<uint8_t>& pins);
+	Esp32HardwarePwm(std::vector<uint8_t>& pins) : Esp32HardwarePwm(pins, Config{})
+	{
+	}
 
 	/**
      * @brief Construct PWM instance with custom configuration
