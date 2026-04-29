@@ -354,7 +354,7 @@ public:
 	 * @return true if started/enqueued successfully
 	 */
 	bool fadePercentChan(uint8_t channel_idx, DutyCycle target_pct, uint32_t fade_time_ms, bool cie = false,
-	                     bool queue = false)
+						 bool queue = false)
 	{
 		if(target_pct < 0.0f)
 			target_pct = 0.0f;
@@ -379,7 +379,6 @@ public:
 
 	/** @brief Get current queue mode for a channel */
 	QueueMode getQueueMode(uint8_t channel) const;
-
 
 	uint16_t getQueueEntries(uint8_t channel) const;
 
